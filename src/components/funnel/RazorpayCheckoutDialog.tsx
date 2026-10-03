@@ -1,12 +1,14 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
   Loader2,
   Lock,
   RotateCcw,
+  Search,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
@@ -30,6 +32,46 @@ import { track } from "@/lib/analytics";
 
 export type CheckoutTier = "live" | "recorded";
 
+interface Country {
+  name: string;
+  code: string;
+  flag: string;
+  sampleLength?: number;
+}
+
+const countries: Country[] = [
+  { name: "India", code: "+91", flag: "🇮🇳", sampleLength: 10 },
+  { name: "United States", code: "+1", flag: "🇺🇸", sampleLength: 10 },
+  { name: "United Kingdom", code: "+44", flag: "🇬🇧", sampleLength: 10 },
+  { name: "United Arab Emirates", code: "+971", flag: "🇦🇪", sampleLength: 9 },
+  { name: "Canada", code: "+1", flag: "🇨🇦", sampleLength: 10 },
+  { name: "Australia", code: "+61", flag: "🇦🇺", sampleLength: 9 },
+  { name: "Singapore", code: "+65", flag: "🇸🇬", sampleLength: 8 },
+  { name: "Saudi Arabia", code: "+966", flag: "🇸🇦", sampleLength: 9 },
+  { name: "Germany", code: "+49", flag: "🇩🇪", sampleLength: 10 },
+  { name: "France", code: "+33", flag: "🇫🇷", sampleLength: 9 },
+  { name: "Pakistan", code: "+92", flag: "🇵🇰", sampleLength: 10 },
+  { name: "Bangladesh", code: "+880", flag: "🇧🇩", sampleLength: 10 },
+  { name: "Nepal", code: "+977", flag: "🇳🇵", sampleLength: 10 },
+  { name: "Sri Lanka", code: "+94", flag: "🇱🇰", sampleLength: 9 },
+  { name: "Qatar", code: "+974", flag: "🇶🇦", sampleLength: 8 },
+  { name: "Kuwait", code: "+965", flag: "🇰🇼", sampleLength: 8 },
+  { name: "Oman", code: "+968", flag: "🇴🇲", sampleLength: 8 },
+  { name: "Bahrain", code: "+973", flag: "🇧🇭", sampleLength: 8 },
+  { name: "Malaysia", code: "+60", flag: "🇲🇾", sampleLength: 9 },
+  { name: "New Zealand", code: "+64", flag: "🇳🇿", sampleLength: 9 },
+  { name: "South Africa", code: "+27", flag: "🇿🇦", sampleLength: 9 },
+  { name: "Indonesia", code: "+62", flag: "🇮🇩", sampleLength: 10 },
+  { name: "Philippines", code: "+63", flag: "🇵🇭", sampleLength: 10 },
+  { name: "Ireland", code: "+353", flag: "🇮🇪", sampleLength: 9 },
+  { name: "Netherlands", code: "+31", flag: "🇳🇱", sampleLength: 9 },
+  { name: "Italy", code: "+39", flag: "🇮🇹", sampleLength: 10 },
+  { name: "Spain", code: "+34", flag: "🇪🇸", sampleLength: 9 },
+  { name: "Brazil", code: "+55", flag: "🇧🇷", sampleLength: 11 },
+  { name: "Nigeria", code: "+234", flag: "🇳🇬", sampleLength: 10 },
+  { name: "Kenya", code: "+254", flag: "🇰🇪", sampleLength: 9 },
+];
+
 interface RazorpayCheckoutDialogProps {
   tier: CheckoutTier | null;
   onClose: () => void;
@@ -39,15 +81,18 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
   const savePayment = useServerFn(recordPayment);
 
   const [phone, setPhone] = useState("");
-  const [error, setError] = useState("");
+  const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]);
+  const [countryModalOpen, setCountryModalOpen] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
 
+  const [error, setError] = useState("");
   const [status, setStatus] = useState<"form" | "processing" | "failed" | "success">("form");
   const [failureReason, setFailureReason] = useState("");
   const [completedPayment, setCompletedPayment] = useState<PaymentDetails | null>(null);
   const [countdown, setCountdown] = useState(3);
   const redirectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Pre-fill phone from previous registration if available
+  // Pre-fill phone and country from previous registration if available
   useEffect(() => {
     if (tier && typeof window !== "undefined") {
       try {
@@ -56,6 +101,10 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
           const parsed = JSON.parse(stored);
           if (parsed.whatsapp) {
             setPhone(parsed.whatsapp.replace(/\D/g, "").slice(-10));
+          }
+          if (parsed.countryCode) {
+            const matched = countries.find((c) => c.code === parsed.countryCode);
+            if (matched) setSelectedCountry(matched);
           }
         }
       } catch {
@@ -67,6 +116,12 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
   const courseConfig = tier === "recorded" ? siteConfig.courses.recorded : siteConfig.courses.live;
   const isRecorded = tier === "recorded";
 
+  const filteredCountries = useMemo(() => {
+    if (!countrySearch.trim()) return countries;
+    const q = countrySearch.toLowerCase().trim();
+    return countries.filter((c) => c.name.toLowerCase().includes(q) || c.code.includes(q));
+  }, [countrySearch]);
+
   // Handle Close & Reset
   const handleClose = () => {
     if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
@@ -76,6 +131,8 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
       setError("");
       setFailureReason("");
       setCompletedPayment(null);
+      setCountryModalOpen(false);
+      setCountrySearch("");
       setCountdown(3);
     }, 250);
   };
@@ -85,19 +142,27 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
     if (e) e.preventDefault();
 
     const cleanPhone = phone.replace(/\D/g, "");
-    if (!cleanPhone || cleanPhone.length < 10) {
-      setError("Please enter a valid 10-digit mobile number");
+    const minLength = selectedCountry.sampleLength || 8;
+    if (!cleanPhone || cleanPhone.length < minLength) {
+      setError(`Please enter a valid ${minLength}-digit mobile number for ${selectedCountry.name}`);
       return;
     }
 
+    const fullInternationalPhone = `${selectedCountry.code} ${cleanPhone}`;
+
     setError("");
     setStatus("processing");
-    track("checkout_payment_initiated", { tier, amount: courseConfig.price, phone: cleanPhone });
+    track("checkout_payment_initiated", {
+      tier,
+      amount: courseConfig.price,
+      phone: fullInternationalPhone,
+      country: selectedCountry.code,
+    });
 
     try {
       const isLoaded = await loadRazorpayScript();
       if (!isLoaded) {
-        throw new Error("Unable to load secure Razorpay gateway. Please check your internet.");
+        throw new Error("Unable to load secure Razorpay gateway. Please check your internet connection.");
       }
 
       const keyId = getRazorpayKeyId();
@@ -113,7 +178,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         description: `${courseConfig.name} — Lifetime Access`,
         image: siteConfig.logo,
         prefill: {
-          contact: cleanPhone,
+          contact: `${selectedCountry.code.replace("+", "")}${cleanPhone}`,
           name: "PenduGPT Learner",
         },
         theme: {
@@ -121,7 +186,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         },
         modal: {
           ondismiss: function () {
-            handlePaymentFailure("Payment was cancelled or window was closed before completion.");
+            handlePaymentFailure("Payment window was closed before completion.");
           },
         },
         handler: async function (response: any) {
@@ -130,6 +195,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
               paymentId: response.razorpay_payment_id,
               orderId: response.razorpay_order_id || orderRef,
               signature: response.razorpay_signature,
+              fullPhone: fullInternationalPhone,
             });
           } else {
             handlePaymentFailure("Payment verification could not be confirmed.");
@@ -174,11 +240,15 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
     paymentId,
     orderId,
     signature,
+    fullPhone,
   }: {
     paymentId: string;
     orderId?: string;
     signature?: string;
+    fullPhone?: string;
   }) => {
+    const contactPhone = fullPhone || `${selectedCountry.code} ${phone}`;
+
     const paymentData: PaymentDetails = {
       paymentId,
       orderId,
@@ -188,7 +258,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
       track: tier || "recorded",
       trackName: courseConfig.name,
       fullName: "PenduGPT Learner",
-      whatsapp: phone,
+      whatsapp: contactPhone,
       timestamp: new Date().toISOString(),
       status: "captured",
     };
@@ -215,7 +285,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         },
       });
     } catch (err) {
-      console.warn("Payment recording preview mode:", err);
+      console.warn("Payment recording info:", err);
     }
 
     // Save locally
@@ -249,12 +319,13 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
     }
   };
 
-  // Simulation test mode for developer sandbox preview
+  // Simulation test mode for developer preview
   const handleSimulateTestPayment = async () => {
     const simulatedPaymentId = `pay_sim_${Date.now().toString().slice(-8)}`;
     await handlePaymentSuccess({
       paymentId: simulatedPaymentId,
       orderId: `ORD_SIM_${Date.now()}`,
+      fullPhone: `${selectedCountry.code} ${phone || "9876543210"}`,
     });
   };
 
@@ -262,7 +333,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
 
   return (
     <Dialog open={!!tier} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="border border-[#00F076]/30 bg-[#070b08]/98 p-6 sm:p-8 backdrop-blur-2xl sm:max-w-[460px] rounded-[28px] sm:rounded-[32px] shadow-[0_0_60px_rgba(0,0,0,0.9)] text-white">
+      <DialogContent className="border border-[#00F076]/30 bg-[#070b08]/98 p-5 sm:p-8 backdrop-blur-2xl sm:max-w-[460px] rounded-[24px] sm:rounded-[32px] shadow-[0_0_60px_rgba(0,0,0,0.9)] text-white">
         {/* =========================================================================
             STATE 1: SUCCESSFUL PAYMENT & AUTO WHATSAPP REDIRECTION
             ========================================================================= */}
@@ -356,7 +427,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
             <div className="mt-5 space-y-3">
               <button
                 onClick={() => handlePayNow()}
-                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#D4FF00] via-[#CCFF00] to-[#B5FF14] py-4 text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_30px_rgba(204,255,0,0.6)] hover:scale-[1.02] transition-all cursor-pointer"
+                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-4 text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.6)] hover:scale-[1.02] transition-all cursor-pointer"
               >
                 <RotateCcw className="h-4 w-4" />
                 <span>Retry Payment ({courseConfig.price})</span>
@@ -366,7 +437,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                 onClick={handleSimulateTestPayment}
                 className="w-full text-center text-[10.5px] text-white/40 hover:text-white/70 py-1 transition-colors underline cursor-pointer"
               >
-                [Developer Mode] Simulate Test Payment Success
+                [Test Mode] Simulate Payment Success & WhatsApp
               </button>
 
               <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-white/60">
@@ -374,7 +445,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                   onClick={() => setStatus("form")}
                   className="hover:text-white transition-colors cursor-pointer"
                 >
-                  ← Change Number
+                  ← Change Details
                 </button>
                 <a
                   href={`https://wa.me/917717526430?text=${encodeURIComponent(
@@ -382,7 +453,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                   )}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[#CCFF00] hover:underline font-semibold"
+                  className="text-[#00F076] hover:underline font-semibold"
                 >
                   Need Help? WhatsApp Us
                 </a>
@@ -391,12 +462,12 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
           </div>
         ) : (
           /* =========================================================================
-             STATE 3: EXACT MATCHING SCREENSHOT UI (CLEAN & SIMPLE MOBILE ENTRY)
+             STATE 3: CLEAN MOBILE ENTRY WITH FULL COUNTRY CODE SELECTOR
              ========================================================================= */
           <div className="relative animate-reveal">
-            {/* Top Pill Badge matching Screenshot */}
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-[#CCFF00]/50 bg-[#0c180a] px-3.5 py-1 text-[11px] font-black tracking-wide text-[#CCFF00] shadow-[0_0_15px_rgba(204,255,0,0.2)] mb-3">
-              <Sparkles className="h-3.5 w-3.5 text-[#CCFF00]" />
+            {/* Top Pill Badge matching theme */}
+            <div className="inline-flex items-center gap-1.5 rounded-full border border-[#00F076]/40 bg-[#072416] px-3.5 py-1 text-[11px] font-black tracking-wide text-[#00F076] shadow-[0_0_15px_rgba(0,240,118,0.2)] mb-3">
+              <Sparkles className="h-3.5 w-3.5 text-[#00F076]" />
               <span>
                 {isRecorded
                   ? "COMPLETE MASTERCLASS • FLAT ₹2,499"
@@ -426,39 +497,44 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                   WHATSAPP MOBILE NUMBER
                 </label>
 
-                {/* Number Input with Country Dropdown prefix pill matching screenshot */}
-                <div className="relative flex items-center rounded-2xl border-2 border-[#CCFF00] bg-[#050805] p-1.5 shadow-[0_0_20px_rgba(204,255,0,0.25)] focus-within:shadow-[0_0_30px_rgba(204,255,0,0.5)] transition-all">
-                  {/* IN +91 Pill */}
-                  <div className="flex items-center gap-1.5 rounded-xl bg-[#10190f] border border-white/10 px-3.5 py-2.5 text-xs font-black text-white shrink-0 select-none">
-                    <span>IN</span>
-                    <span className="text-[#CCFF00] font-mono font-bold">+91</span>
-                    <ChevronDown className="h-3 w-3 text-white/50 ml-0.5" />
-                  </div>
+                {/* Number Input with Interactive Country Selector Dropdown */}
+                <div className="relative flex items-center rounded-2xl border-2 border-[#00F076] bg-[#050805] p-1.5 shadow-[0_0_20px_rgba(0,240,118,0.25)] focus-within:shadow-[0_0_30px_rgba(0,240,118,0.5)] transition-all">
+                  {/* Interactive Country Selector Trigger Button */}
+                  <button
+                    type="button"
+                    onClick={() => setCountryModalOpen(true)}
+                    className="flex items-center gap-1.5 rounded-xl bg-[#0a180e] hover:bg-[#00F076]/20 border border-[#00F076]/30 px-3 py-2 text-xs font-black text-white shrink-0 select-none transition-all cursor-pointer"
+                    title="Change country code"
+                  >
+                    <span className="text-sm">{selectedCountry.flag}</span>
+                    <span className="text-[#00F076] font-mono font-bold">{selectedCountry.code}</span>
+                    <ChevronDown className="h-3 w-3 text-white/60 ml-0.5" />
+                  </button>
 
                   {/* Input field */}
                   <input
                     id="checkoutMobile"
                     type="tel"
                     inputMode="numeric"
-                    maxLength={10}
+                    maxLength={selectedCountry.sampleLength ? selectedCountry.sampleLength + 2 : 12}
                     autoFocus
-                    placeholder="9876543210"
+                    placeholder={selectedCountry.sampleLength === 10 ? "9876543210" : "1234567890"}
                     value={phone}
                     onChange={(e) => {
                       setPhone(e.target.value.replace(/\D/g, ""));
                       if (error) setError("");
                     }}
-                    className="w-full bg-transparent px-3.5 py-2 text-base sm:text-lg font-black font-mono text-white placeholder:text-white/20 outline-none tracking-wider"
+                    className="w-full bg-transparent px-3 py-2 text-base sm:text-lg font-black font-mono text-white placeholder:text-white/20 outline-none tracking-wider"
                   />
                 </div>
                 {error && <p className="mt-1.5 text-xs font-bold text-red-400 pl-1">{error}</p>}
               </div>
 
-              {/* Glowing High-Converting CTA Button matching Screenshot */}
+              {/* Glowing High-Converting CTA Button */}
               <button
                 type="submit"
                 disabled={status === "processing"}
-                className="group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#D4FF00] via-[#CCFF00] to-[#B5FF14] py-4 px-6 text-sm sm:text-base font-display font-black tracking-wide text-black shadow-[0_0_35px_rgba(204,255,0,0.65)] hover:shadow-[0_0_50px_rgba(204,255,0,0.9)] hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-75 mt-4"
+                className="group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-4 px-6 text-sm sm:text-base font-display font-black tracking-wide text-black shadow-[0_0_35px_rgba(0,240,118,0.65)] hover:shadow-[0_0_50px_rgba(0,240,118,0.9)] hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-75 mt-4"
               >
                 {status === "processing" ? (
                   <>
@@ -473,14 +549,77 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                 )}
               </button>
 
-              {/* Minimal Trust Badge matching Screenshot */}
+              {/* Trust Badge */}
               <div className="pt-2 text-center">
                 <p className="inline-flex items-center gap-1.5 text-xs font-bold text-white/70">
-                  <Lock className="h-3.5 w-3.5 text-[#CCFF00]" />
+                  <Lock className="h-3.5 w-3.5 text-[#00F076]" />
                   <span>100% PCI-DSS Secure Razorpay Checkout</span>
                 </p>
               </div>
             </form>
+
+            {/* Country Selector Search Modal Overlay */}
+            {countryModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-reveal">
+                <div className="w-full max-w-sm rounded-[24px] border border-[#00F076]/40 bg-[#070e09] p-5 shadow-[0_0_50px_rgba(0,0,0,0.9)] text-white">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                    <h4 className="font-display font-bold text-sm text-white">Select Country Code</h4>
+                    <button
+                      type="button"
+                      onClick={() => setCountryModalOpen(false)}
+                      className="p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* Country Search Bar */}
+                  <div className="relative mt-3">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40" />
+                    <input
+                      type="text"
+                      placeholder="Search country or code (+91, +1)..."
+                      value={countrySearch}
+                      onChange={(e) => setCountrySearch(e.target.value)}
+                      className="w-full rounded-xl border border-white/15 bg-black/60 pl-9 pr-3 py-2 text-xs text-white placeholder:text-white/30 outline-none focus:border-[#00F076]"
+                      autoFocus
+                    />
+                  </div>
+
+                  {/* Scrollable Country List */}
+                  <div className="mt-3 max-h-56 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
+                    {filteredCountries.map((c) => {
+                      const isSelected = selectedCountry.code === c.code && selectedCountry.name === c.name;
+                      return (
+                        <button
+                          key={`${c.name}-${c.code}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCountry(c);
+                            setCountryModalOpen(false);
+                            setCountrySearch("");
+                          }}
+                          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs transition-all cursor-pointer ${
+                            isSelected
+                              ? "bg-[#00F076]/20 text-[#00F076] font-bold border border-[#00F076]/40"
+                              : "hover:bg-white/10 text-white"
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="text-base">{c.flag}</span>
+                            <span>{c.name}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 font-mono">
+                            <span className="text-white/70">{c.code}</span>
+                            {isSelected && <Check className="h-3.5 w-3.5 text-[#00F076]" />}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </DialogContent>

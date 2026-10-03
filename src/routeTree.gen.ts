@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NextStepRouteImport } from './routes/next-step'
+import { Route as SecretTestRouteImport } from './routes/secret-test'
 import { Route as TrainingRouteImport } from './routes/training'
 
 const IndexRoute = IndexRouteImport.update({
@@ -23,6 +24,11 @@ const NextStepRoute = NextStepRouteImport.update({
   path: '/next-step',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SecretTestRoute = SecretTestRouteImport.update({
+  id: '/secret-test',
+  path: '/secret-test',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TrainingRoute = TrainingRouteImport.update({
   id: '/training',
   path: '/training',
@@ -32,30 +38,34 @@ const TrainingRoute = TrainingRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/next-step': typeof NextStepRoute
+  '/secret-test': typeof SecretTestRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/next-step': typeof NextStepRoute
+  '/secret-test': typeof SecretTestRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/next-step': typeof NextStepRoute
+  '/secret-test': typeof SecretTestRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/next-step' | '/training'
+  fullPaths: '/' | '/next-step' | '/secret-test' | '/training'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/next-step' | '/training'
-  id: '__root__' | '/' | '/next-step' | '/training'
+  to: '/' | '/next-step' | '/secret-test' | '/training'
+  id: '__root__' | '/' | '/next-step' | '/secret-test' | '/training'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   NextStepRoute: typeof NextStepRoute
+  SecretTestRoute: typeof SecretTestRoute
   TrainingRoute: typeof TrainingRoute
 }
 
@@ -75,6 +85,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NextStepRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/secret-test': {
+      id: '/secret-test'
+      path: '/secret-test'
+      fullPath: '/secret-test'
+      preLoaderRoute: typeof SecretTestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/training': {
       id: '/training'
       path: '/training'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   NextStepRoute: NextStepRoute,
+  SecretTestRoute: SecretTestRoute,
   TrainingRoute: TrainingRoute,
 }
 export const routeTree = rootRouteImport

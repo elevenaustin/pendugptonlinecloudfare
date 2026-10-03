@@ -73,9 +73,38 @@ export function NextStepScreen() {
 
   const pricingSectionRef = useRef<HTMLDivElement>(null);
 
-  // Strict Funnel Guard: Verify visitor completed Step 1 (Registration) AND Step 2 (Training Video)
+  // Strict Funnel Guard + Secret Tester Link Bypass:
+  // Secret testing links supported: ?preview=true, ?test=true, ?secret=pendu, ?bypass=true
   useEffect(() => {
     try {
+      if (typeof window !== "undefined") {
+        const searchParams = new URLSearchParams(window.location.search);
+        const hasSecretBypass =
+          searchParams.has("test") ||
+          searchParams.has("preview") ||
+          searchParams.has("secret") ||
+          searchParams.has("bypass") ||
+          searchParams.has("demo") ||
+          localStorage.getItem("pendugpt_secret_bypass") === "true";
+
+        if (hasSecretBypass) {
+          try {
+            localStorage.setItem(
+              siteConfig.video.registrationKey,
+              JSON.stringify({ whatsapp: "9876543210", registered: true, isTester: true }),
+            );
+            localStorage.setItem(siteConfig.video.completionKey, "true");
+            localStorage.setItem("pendugpt_secret_bypass", "true");
+          } catch {
+            /* ignore */
+          }
+          setIsAuthorized(true);
+          setIsMounted(true);
+          loadRazorpayScript().catch(() => {});
+          return;
+        }
+      }
+
       // 1. Check if user completed registration
       const reg = JSON.parse(localStorage.getItem(siteConfig.video.registrationKey) || "null");
       if (!reg || !reg.registered) {

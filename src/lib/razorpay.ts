@@ -52,8 +52,13 @@ export function loadRazorpayScript(): Promise<boolean> {
  * Retrieves configured Razorpay Key ID or fallback.
  */
 export function getRazorpayKeyId(): string {
-  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_RAZORPAY_KEY_ID) {
-    return import.meta.env.VITE_RAZORPAY_KEY_ID;
+  if (typeof import.meta !== "undefined") {
+    if (import.meta.env?.VITE_RAZORPAY_KEY_ID) {
+      return import.meta.env.VITE_RAZORPAY_KEY_ID;
+    }
+    if (import.meta.env?.RAZORPAY_KEY_ID) {
+      return import.meta.env.RAZORPAY_KEY_ID;
+    }
   }
   return siteConfig.razorpay?.keyId || "rzp_live_default";
 }
