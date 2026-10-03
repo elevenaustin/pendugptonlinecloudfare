@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useTransition, useId } from "react";
+import React, { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   getAdminOverviewMetrics,
@@ -41,7 +41,11 @@ import {
   Mail,
   Key,
   Menu,
+  KeyRound,
 } from "lucide-react";
+
+const ADMIN_SECRET_KEY = "PEnduGPT2026";
+const STORAGE_KEY = "pendugpt_admin_secret_auth";
 
 export function AdminDashboard() {
   const [session, setSession] = useState<any>(null);
@@ -49,17 +53,54 @@ export function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<"overview" | "registrations" | "orders" | "settings">("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Check auth session
+  // Check auth session (both Supabase Auth and Secret Key "PEnduGPT2026")
   useEffect(() => {
+    // 1. Check URL query param ?key=PEnduGPT2026
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const keyFromUrl = urlParams.get("key");
+      if (keyFromUrl && keyFromUrl.trim() === ADMIN_SECRET_KEY) {
+        localStorage.setItem(STORAGE_KEY, ADMIN_SECRET_KEY);
+        setSession({
+          user: { email: "master-admin@pendugpt.com", role: "SuperAdmin" },
+          isSecretKey: true,
+        });
+        setLoadingAuth(false);
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 2. Check LocalStorage secret key
+    try {
+      const savedKey = localStorage.getItem(STORAGE_KEY);
+      if (savedKey === ADMIN_SECRET_KEY) {
+        setSession({
+          user: { email: "master-admin@pendugpt.com", role: "SuperAdmin" },
+          isSecretKey: true,
+        });
+        setLoadingAuth(false);
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 3. Fall back to Supabase session check
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+      if (session) {
+        setSession(session);
+      }
       setLoadingAuth(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+      if (session) {
+        setSession(session);
+      }
       setLoadingAuth(false);
     });
 
@@ -67,6 +108,11 @@ export function AdminDashboard() {
   }, []);
 
   const handleSignOut = async () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
     await supabase.auth.signOut();
     setSession(null);
   };
@@ -85,6 +131,8 @@ export function AdminDashboard() {
   if (!session) {
     return <AdminLoginForm onLoginSuccess={(sess) => setSession(sess)} />;
   }
+
+  const userEmail = session.user?.email || "master-admin@pendugpt.com";
 
   return (
     <div className="flex min-h-screen bg-[#020604] text-zinc-100 selection:bg-emerald-500/30 selection:text-emerald-300">
@@ -194,11 +242,13 @@ export function AdminDashboard() {
           <div className="mb-3 rounded-lg bg-emerald-950/30 p-2.5 border border-emerald-900/40">
             <div className="flex items-center gap-2">
               <div className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-              <p className="truncate text-xs font-medium text-zinc-200" title={session.user.email}>
-                {session.user.email}
+              <p className="truncate text-xs font-medium text-zinc-200" title={userEmail}>
+                {userEmail}
               </p>
             </div>
-            <p className="mt-0.5 text-[10px] text-zinc-500">Authorized Admin</p>
+            <p className="mt-0.5 text-[10px] text-zinc-500">
+              {session.isSecretKey ? "Master Admin (Key Authenticated)" : "Authorized Admin"}
+            </p>
           </div>
 
           <button
@@ -248,7 +298,7 @@ export function AdminDashboard() {
           {activeTab === "overview" && <AdminOverviewTab onNavigate={setActiveTab} />}
           {activeTab === "registrations" && <AdminRegistrationsTab />}
           {activeTab === "orders" && <AdminOrdersTab />}
-          {activeTab === "settings" && <AdminSettingsTab userEmail={session.user.email} onSignOut={handleSignOut} />}
+          {activeTab === "settings" && <AdminSettingsTab userEmail={userEmail} onSignOut={handleSignOut} />}
         </main>
       </div>
     </div>
@@ -257,17 +307,41 @@ export function AdminDashboard() {
 
 /**
  * ============================================================================
- * LOGIN SCREEN COMPONENT
+ * LOGIN SCREEN COMPONENT (Supports Secret Key "PEnduGPT2026" & Supabase Auth)
  * ============================================================================
  */
 function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => void }) {
+  const [authMode, setAuthMode] = useState<"key" | "email">("key");
+  const [secretKeyInput, setSecretKeyInput] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showSetupHelp, setShowSetupHelp] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Handle Secret Key "PEnduGPT2026" authentication
+  const handleKeyLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    const inputClean = secretKeyInput.trim();
+    if (inputClean === ADMIN_SECRET_KEY) {
+      try {
+        localStorage.setItem(STORAGE_KEY, ADMIN_SECRET_KEY);
+      } catch {
+        /* ignore */
+      }
+      onLoginSuccess({
+        user: { email: "master-admin@pendugpt.com", role: "SuperAdmin" },
+        isSecretKey: true,
+      });
+    } else {
+      setErrorMsg("Incorrect secret admin code. Please verify and try again.");
+    }
+  };
+
+  // Handle Supabase Email & Password authentication
+  const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setLoading(true);
@@ -308,6 +382,40 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
 
         {/* Login Box */}
         <div className="rounded-xl border border-emerald-950/80 bg-[#040d08]/90 p-6 shadow-2xl backdrop-blur-md">
+          {/* Auth Method Tabs */}
+          <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg border border-emerald-950/80 bg-black/60 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("key");
+                setErrorMsg(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
+                authMode === "key"
+                  ? "bg-emerald-500 text-black shadow"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>Admin Secret Key</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("email");
+                setErrorMsg(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
+                authMode === "email"
+                  ? "bg-emerald-500 text-black shadow"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <Mail className="h-3.5 w-3.5" />
+              <span>Email & Password</span>
+            </button>
+          </div>
+
           {errorMsg && (
             <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-red-900/40 bg-red-950/30 p-3 text-xs text-red-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
@@ -315,55 +423,90 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-zinc-300">Admin Email</label>
-              <div className="relative mt-1.5">
-                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@pendugpt.com"
-                  className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
+          {/* Mode 1: Secret Key Auth */}
+          {authMode === "key" ? (
+            <form onSubmit={handleKeyLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">
+                  Secret Admin Passcode
+                </label>
+                <div className="relative mt-1.5">
+                  <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="password"
+                    required
+                    autoFocus
+                    value={secretKeyInput}
+                    onChange={(e) => setSecretKeyInput(e.target.value)}
+                    placeholder="Enter Secret Code (e.g. PEnduGPT2026)"
+                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+                <p className="mt-1.5 text-[11px] text-zinc-500">
+                  Enter your master secret key to unlock instant dashboard access.
+                </p>
               </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-300">Password</label>
-              <div className="relative mt-1.5">
-                <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
+              <button
+                type="submit"
+                className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400"
+              >
+                <Lock className="h-4 w-4" />
+                <span>Unlock Admin Dashboard</span>
+              </button>
+            </form>
+          ) : (
+            /* Mode 2: Supabase Email & Password Auth */
+            <form onSubmit={handleEmailLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">Admin Email</label>
+                <div className="relative mt-1.5">
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="admin@pendugpt.com"
+                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {loading ? (
-                <>
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span>Authenticating...</span>
-                </>
-              ) : (
-                <>
-                  <Lock className="h-4 w-4" />
-                  <span>Access Dashboard</span>
-                </>
-              )}
-            </button>
-          </form>
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">Password</label>
+                <div className="relative mt-1.5">
+                  <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••••••"
+                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Authenticating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    <span>Access Dashboard</span>
+                  </>
+                )}
+              </button>
+            </form>
+          )}
 
           {/* Setup Guide Accordion */}
           <div className="mt-6 border-t border-emerald-950/60 pt-4 text-center">
@@ -378,17 +521,11 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
 
             {showSetupHelp && (
               <div className="mt-3 rounded-lg border border-emerald-900/40 bg-emerald-950/30 p-3 text-left text-xs leading-relaxed text-zinc-300">
-                <p className="font-semibold text-emerald-400">Step 1: Open Supabase Dashboard</p>
+                <p className="font-semibold text-emerald-400">Master Secret Key:</p>
+                <p className="text-zinc-300 font-mono mt-0.5">PEnduGPT2026</p>
+                <p className="mt-2 font-semibold text-emerald-400">Or via Supabase Dashboard:</p>
                 <p className="mt-1 text-zinc-400">
-                  Go to your Supabase project (<code>xlyqrzcstkxdkyvdensc</code>) → <strong>Authentication</strong> → <strong>Users</strong>.
-                </p>
-                <p className="mt-2 font-semibold text-emerald-400">Step 2: Add User</p>
-                <p className="mt-1 text-zinc-400">
-                  Click <strong>"Add User"</strong> → <strong>"Create User"</strong>, enter your admin email and a secure password, and toggle <strong>"Auto Confirm User"</strong>.
-                </p>
-                <p className="mt-2 font-semibold text-emerald-400">Step 3: Log in</p>
-                <p className="mt-1 text-zinc-400">
-                  Return here and log in with those credentials.
+                  Go to Supabase (<code>xlyqrzcstkxdkyvdensc</code>) → <strong>Authentication</strong> → <strong>Users</strong> → <strong>Add User</strong>.
                 </p>
               </div>
             )}
@@ -1419,7 +1556,7 @@ function AdminSettingsTab({ userEmail, onSignOut }: { userEmail: string; onSignO
           <div className="flex items-center justify-between rounded-lg border border-emerald-900/30 bg-black/40 p-3 text-xs">
             <span className="text-zinc-400">Authorization Level:</span>
             <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-300 border border-emerald-500/30">
-              Full Administrator (RLS Bypass via Server Client)
+              Full Administrator (Master Secret Access)
             </span>
           </div>
         </div>
@@ -1435,34 +1572,21 @@ function AdminSettingsTab({ userEmail, onSignOut }: { userEmail: string; onSignO
         </div>
       </div>
 
-      {/* Team Invitation Guide */}
+      {/* Secret Access Key Card */}
       <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-6">
-        <h3 className="text-base font-bold text-white">Team Management & Access Control</h3>
+        <h3 className="text-base font-bold text-white">Secret Master Access Key</h3>
         <p className="mt-1 text-xs text-zinc-400">
-          How to grant dashboard access to additional team members
+          Fast-access pass for authorized administrators
         </p>
 
-        <div className="mt-4 space-y-3 text-xs text-zinc-300">
-          <div className="rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 leading-relaxed">
-            <p className="font-semibold text-emerald-400">1. Open Supabase Console</p>
-            <p className="text-zinc-400">
-              Navigate to your Supabase project (<code>xlyqrzcstkxdkyvdensc</code>) &gt; <strong>Authentication</strong> &gt; <strong>Users</strong>.
-            </p>
+        <div className="mt-4 rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 flex items-center justify-between">
+          <div>
+            <p className="text-[11px] text-zinc-400">Secret Admin Code</p>
+            <p className="font-mono text-sm font-bold text-emerald-400">PEnduGPT2026</p>
           </div>
-
-          <div className="rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 leading-relaxed">
-            <p className="font-semibold text-emerald-400">2. Create New Admin Credentials</p>
-            <p className="text-zinc-400">
-              Click <strong>"Add user"</strong> &gt; <strong>"Create user"</strong>. Enter their email address and a secure password. Enable <strong>"Auto Confirm User"</strong> so they can log in instantly without email verification delay.
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 leading-relaxed">
-            <p className="font-semibold text-emerald-400">3. Direct Login Access</p>
-            <p className="text-zinc-400">
-              Direct them to <code>/admin</code> to log in securely. There is zero public signup exposure.
-            </p>
-          </div>
+          <span className="rounded bg-emerald-500/20 px-2 py-1 text-[11px] font-semibold text-emerald-300 border border-emerald-500/30">
+            Active
+          </span>
         </div>
       </div>
 
