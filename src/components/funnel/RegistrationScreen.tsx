@@ -18,6 +18,7 @@ import { siteConfig } from "@/config/site";
 import { registrationSchema, submitRegistration } from "@/lib/leads.functions";
 import { track } from "@/lib/analytics";
 import { BrandLogo } from "@/components/common/BrandLogo";
+import { RegistrationSkeleton } from "@/components/common/Skeleton";
 
 interface Country {
   name: string;
@@ -63,6 +64,7 @@ export function RegistrationScreen() {
   const navigate = useNavigate();
   const registerFn = useServerFn(submitRegistration);
 
+  const [isReady, setIsReady] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]);
   const [countryModalOpen, setCountryModalOpen] = useState(false);
@@ -81,10 +83,12 @@ export function RegistrationScreen() {
       const saved = JSON.parse(localStorage.getItem(siteConfig.video.registrationKey) || "null");
       if (saved && saved.registered) {
         navigate({ to: "/training" });
+        return;
       }
     } catch {
       /* ignore */
     }
+    setIsReady(true);
   }, [navigate]);
 
   const filteredCountries = useMemo(() => {
@@ -92,6 +96,10 @@ export function RegistrationScreen() {
     const q = countrySearch.toLowerCase().trim();
     return countries.filter((c) => c.name.toLowerCase().includes(q) || c.code.includes(q));
   }, [countrySearch]);
+
+  if (!isReady) {
+    return <RegistrationSkeleton />;
+  }
 
   const handleStep1Submit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();

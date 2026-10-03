@@ -123,17 +123,22 @@ export function LiveEnrollmentToast() {
   useEffect(() => {
     if (isDismissed) return;
 
-    // Cycle every 6.5 seconds
+    let timeoutId: NodeJS.Timeout | null = null;
+
+    // Cycle every 7.5 seconds
     const interval = setInterval(() => {
       setIsVisible(false);
 
-      setTimeout(() => {
+      timeoutId = setTimeout(() => {
         setCurrentIndex((prev) => (prev + 1) % purchaseAlerts.length);
         setIsVisible(true);
-      }, 400);
-    }, 6500);
+      }, 350);
+    }, 7500);
 
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [isDismissed]);
 
   if (isDismissed || !isVisible) return null;

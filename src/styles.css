@@ -301,6 +301,36 @@
   }
 }
 
+@keyframes skeletonPulse {
+  0% {
+    background-position: 150% 0;
+  }
+  100% {
+    background-position: -150% 0;
+  }
+}
+
+@utility skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.03) 0%,
+    rgba(0, 240, 118, 0.06) 30%,
+    rgba(255, 255, 255, 0.12) 50%,
+    rgba(0, 240, 118, 0.06) 70%,
+    rgba(255, 255, 255, 0.03) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeletonPulse 1.8s ease-in-out infinite;
+  transform: translateZ(0);
+}
+
+@utility gpu-accelerated {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
 @utility animate-reveal {
   animation: reveal 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }

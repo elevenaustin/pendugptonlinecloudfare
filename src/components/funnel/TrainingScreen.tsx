@@ -20,6 +20,7 @@ import {
 import { siteConfig } from "@/config/site";
 import { track } from "@/lib/analytics";
 import { BrandLogo } from "@/components/common/BrandLogo";
+import { TrainingSkeleton } from "@/components/common/Skeleton";
 
 export function TrainingScreen() {
   const navigate = useNavigate();
@@ -289,16 +290,7 @@ export function TrainingScreen() {
   const pct = Math.round(progress * 100);
 
   if (isAuthorized === null || isAuthorized === false) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center text-white">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-9 w-9 rounded-full border-2 border-[#00F076]/20 border-t-[#00F076] animate-spin" />
-          <p className="text-xs font-semibold text-[#00F076]/90 tracking-wide">
-            Verifying training access...
-          </p>
-        </div>
-      </div>
-    );
+    return <TrainingSkeleton />;
   }
 
   return (

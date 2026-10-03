@@ -44,26 +44,19 @@ import { StudentReviewsMarquee } from "@/components/funnel/StudentReviewsMarquee
 import { BrandLogo } from "@/components/common/BrandLogo";
 import { SiteFooter } from "@/components/common/SiteFooter";
 import { track } from "@/lib/analytics";
+import { NextStepSkeleton } from "@/components/common/Skeleton";
+import { loadRazorpayScript } from "@/lib/razorpay";
 
 export function NextStepScreen() {
   const navigate = useNavigate();
   const { recorded, live } = siteConfig.courses;
   const nextStepVimeoId = siteConfig.nextStepVideo?.vimeoId || "1232620094";
-  const { completionKey } = siteConfig.video;
 
+  const [isMounted, setIsMounted] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const playerRef = useRef<Player | null>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const hideControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Initialize isCompleted synchronously so iframe mounts on initial render
-  const [isCompleted, setIsCompleted] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(completionKey) === "true";
-    } catch {
-      return true;
-    }
-  });
 
   const [selectedTier, setSelectedTier] = useState<CheckoutTier | null>(null);
   const [showPricing, setShowPricing] = useState(true);
@@ -76,6 +69,12 @@ export function NextStepScreen() {
   const [duration, setDuration] = useState(0);
 
   const pricingSectionRef = useRef<HTMLDivElement>(null);
+
+  // Pre-fetch Razorpay script in background for instant payment modal opening on low-end networks
+  useEffect(() => {
+    setIsMounted(true);
+    loadRazorpayScript().catch(() => {});
+  }, []);
 
   const triggerControlsAutoHide = () => {
     setShowControls(true);
@@ -295,6 +294,10 @@ export function NextStepScreen() {
   };
 
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
+
+  if (!isMounted) {
+    return <NextStepSkeleton />;
+  }
 
   return (
     <div className="min-h-screen flex flex-col justify-between text-foreground selection:bg-[#00F076] selection:text-black bg-[#020604]">

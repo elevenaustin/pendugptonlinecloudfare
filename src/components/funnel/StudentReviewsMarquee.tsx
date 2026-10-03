@@ -178,6 +178,8 @@ export function StudentReviewsMarquee() {
                     <img
                       src={rev.avatarImage}
                       alt={rev.name}
+                      loading="lazy"
+                      decoding="async"
                       className="h-12 w-12 rounded-xl object-cover ring-2 ring-[#00F076]/40 shadow-md shrink-0"
                       onError={(e) => {
                         e.currentTarget.src = "/pendugpt-logo.jpg";
