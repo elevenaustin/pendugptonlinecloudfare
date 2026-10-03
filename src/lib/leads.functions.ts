@@ -26,26 +26,40 @@ export type RegistrationInput = z.infer<typeof registrationSchema>;
 export const submitRegistration = createServerFn({ method: "POST" })
   .validator((data: unknown) => registrationSchema.parse(data))
   .handler(async ({ data }) => {
+    let registrationId: string | undefined;
     try {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const fullPhone = `${data.countryCode}${data.whatsapp}`;
-      const { error } = await supabaseAdmin.from("leads").insert({
-        full_name: data.gender ? `Learner (${data.gender})` : "Training Registrant",
-        whatsapp: fullPhone,
-        email: null,
-        interest: "training_funnel",
-        consent: data.marketingConsent,
-      });
+
+      // 1. Insert into public.registrations
+      const { data: regData, error } = await supabaseAdmin
+        .from("registrations")
+        .insert({
+          phone_country_code: data.countryCode || "+91",
+          phone_number: data.whatsapp,
+          gender: data.gender || null,
+          device_availability: data.device || null,
+        })
+        .select("id")
+        .single();
 
       if (error) {
-        console.error("Supabase lead insertion error:", error.message);
+        console.error("Supabase registration error:", error.message);
+      } else if (regData?.id) {
+        registrationId = regData.id;
+
+        // 2. Log funnel event
+        await supabaseAdmin.from("funnel_events").insert({
+          registration_id: registrationId,
+          event_name: "registration_completed",
+        });
       }
     } catch (err) {
-      console.warn("Server registration handler running in local/preview mode:", err);
+      console.warn("Server registration handler notice:", err);
     }
 
     return {
       ok: true,
+      registrationId,
       registeredAt: new Date().toISOString(),
       whatsappSuffix: data.whatsapp.slice(-4),
     };

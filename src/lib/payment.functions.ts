@@ -74,6 +74,25 @@ export const createRazorpayOrder = createServerFn({ method: "POST" })
       }
 
       const order = (await res.json()) as any;
+
+      // Log pending order into Supabase
+      try {
+        const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+        await supabaseAdmin.from("orders").insert({
+          selected_option: data.track,
+          amount: data.amountInPaise / 100,
+          currency: "INR",
+          razorpay_order_id: order.id,
+          payment_status: "pending",
+        });
+
+        await supabaseAdmin.from("funnel_events").insert({
+          event_name: `order_initiated_${data.track}`,
+        });
+      } catch (dbErr) {
+        console.warn("Orders table logging notice:", dbErr);
+      }
+
       return {
         ok: true,
         orderId: order.id as string,
@@ -100,19 +119,33 @@ export const recordPayment = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     try {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const { error } = await supabaseAdmin.from("leads").insert({
-        full_name: data.fullName || "PenduGPT Paid Learner",
-        whatsapp: data.whatsapp.replace(/[\s-]/g, ""),
-        email: data.email || null,
-        interest: `${data.track}_paid_${data.paymentId}_₹${data.numericAmount}`,
-        consent: true,
-      });
 
-      if (error) {
-        console.error("Supabase payment lead record error:", error.message);
+      // 1. Update or Insert into public.orders table
+      if (data.orderId) {
+        await supabaseAdmin
+          .from("orders")
+          .update({
+            razorpay_payment_id: data.paymentId,
+            payment_status: "captured",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("razorpay_order_id", data.orderId);
+      } else {
+        await supabaseAdmin.from("orders").insert({
+          selected_option: data.track,
+          amount: data.numericAmount,
+          currency: "INR",
+          razorpay_payment_id: data.paymentId,
+          payment_status: "captured",
+        });
       }
+
+      // 2. Log funnel event
+      await supabaseAdmin.from("funnel_events").insert({
+        event_name: `payment_captured_${data.track}`,
+      });
     } catch (err) {
-      console.warn("Payment recording running in local/preview mode:", err);
+      console.warn("Payment recording error:", err);
     }
 
     return {

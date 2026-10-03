@@ -152,8 +152,10 @@ export function RegistrationScreen() {
           siteConfig.video.registrationKey,
           JSON.stringify({
             registered: true,
+            registrationId: res?.registrationId,
             registeredAt: res?.registeredAt || new Date().toISOString(),
             countryCode: selectedCountry.code,
+            whatsapp,
             suffix: whatsapp.slice(-4),
           }),
         );
