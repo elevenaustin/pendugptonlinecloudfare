@@ -146,12 +146,14 @@ export function TrainingScreen() {
 
       player.on("play", () => {
         setIsPlaying(true);
+        triggerControlsAutoHide();
         track("video_start");
       });
 
       player.on("pause", async () => {
         setIsPlaying(false);
         setShowControls(true);
+        if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
         try {
           const cur = await player.getCurrentTime();
           persist(progress, isCompleted, cur);
@@ -193,6 +195,7 @@ export function TrainingScreen() {
 
       player.on("ended", () => {
         setIsPlaying(false);
+        setShowControls(true);
         handleCompletion();
       });
     } catch (err) {
@@ -200,18 +203,51 @@ export function TrainingScreen() {
     }
 
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const doc: any = document;
+      const isFull = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+      setIsFullscreen(isFull);
     };
+
     document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
 
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
+      if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
       if (playerRef.current) {
         playerRef.current.unload().catch(() => {});
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthorized, completionThreshold]);
+
+  const triggerControlsAutoHide = () => {
+    setShowControls(true);
+    if (hideControlsTimer.current) {
+      clearTimeout(hideControlsTimer.current);
+    }
+    hideControlsTimer.current = setTimeout(() => {
+      setShowControls(false);
+    }, 2500);
+  };
+
+  const handleUserActivity = () => {
+    if (isPlaying) {
+      triggerControlsAutoHide();
+    } else {
+      setShowControls(true);
+    }
+  };
 
   const togglePlay = async () => {
     if (!playerRef.current) return;
@@ -220,9 +256,12 @@ export function TrainingScreen() {
       if (paused) {
         await playerRef.current.play();
         setIsPlaying(true);
+        triggerControlsAutoHide();
       } else {
         await playerRef.current.pause();
         setIsPlaying(false);
+        setShowControls(true);
+        if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
       }
     } catch {
       /* fallback */
@@ -230,6 +269,7 @@ export function TrainingScreen() {
   };
 
   const handleRewind10 = async () => {
+    handleUserActivity();
     if (!playerRef.current) return;
     try {
       const current = await playerRef.current.getCurrentTime();
@@ -243,6 +283,7 @@ export function TrainingScreen() {
   };
 
   const toggleMute = async () => {
+    handleUserActivity();
     if (!playerRef.current) return;
     try {
       const muted = await playerRef.current.getMuted();
@@ -254,30 +295,49 @@ export function TrainingScreen() {
   };
 
   const toggleFullscreen = async () => {
+    handleUserActivity();
     const container = videoContainerRef.current;
     if (!container) return;
-    try {
-      if (!document.fullscreenElement) {
-        await container.requestFullscreen();
-        setIsFullscreen(true);
-      } else {
-        await document.exitFullscreen();
-        setIsFullscreen(false);
-      }
-    } catch {
-      /* fallback */
-    }
-  };
 
-  const handleMouseMove = () => {
-    setShowControls(true);
-    if (hideControlsTimer.current) {
-      clearTimeout(hideControlsTimer.current);
-    }
-    if (isPlaying) {
-      hideControlsTimer.current = setTimeout(() => {
-        setShowControls(false);
-      }, 2500);
+    const doc: any = document;
+    const isCurrentlyFull = !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    );
+
+    try {
+      if (!isCurrentlyFull && !isFullscreen) {
+        setIsFullscreen(true);
+        if (container.requestFullscreen) {
+          await container.requestFullscreen().catch(() => {});
+        } else if ((container as any).webkitRequestFullscreen) {
+          (container as any).webkitRequestFullscreen();
+        } else if ((container as any).mozRequestFullScreen) {
+          (container as any).mozRequestFullScreen();
+        } else if ((container as any).msRequestFullscreen) {
+          (container as any).msRequestFullscreen();
+        } else if (playerRef.current) {
+          await playerRef.current.requestFullscreen().catch(() => {});
+        }
+      } else {
+        setIsFullscreen(false);
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen().catch(() => {});
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        } else if (doc.mozCancelFullScreen) {
+          doc.mozCancelFullScreen();
+        } else if (doc.msExitFullscreen) {
+          doc.msExitFullscreen();
+        } else if (playerRef.current) {
+          await playerRef.current.exitFullscreen().catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn("Fullscreen toggle fallback:", err);
+      setIsFullscreen((prev) => !prev);
     }
   };
 
@@ -348,9 +408,16 @@ export function TrainingScreen() {
 
           <div
             ref={videoContainerRef}
-            onMouseMove={handleMouseMove}
+            onMouseMove={handleUserActivity}
+            onTouchStart={handleUserActivity}
+            onTouchMove={handleUserActivity}
+            onClick={handleUserActivity}
             onMouseLeave={() => isPlaying && setShowControls(false)}
-            className="relative overflow-hidden rounded-[24px] sm:rounded-[32px] glass-card p-3 sm:p-5 transition-all"
+            className={`relative overflow-hidden transition-all duration-300 ${
+              isFullscreen
+                ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex items-center justify-center p-0 rounded-none"
+                : "rounded-[20px] xs:rounded-[26px] sm:rounded-[32px] glass-card p-1.5 xs:p-2.5 sm:p-4 md:p-5"
+            }`}
           >
             <div className="relative aspect-video w-full overflow-hidden rounded-xl sm:rounded-2xl bg-[#020503] shadow-2xl">
               {/* Vimeo Iframe with Hidden Native Controls */}
@@ -375,36 +442,36 @@ export function TrainingScreen() {
                   <button
                     type="button"
                     onClick={togglePlay}
-                    className="pointer-events-auto grid h-20 w-20 sm:h-24 sm:w-24 place-items-center rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black shadow-[0_0_40px_rgba(0,240,118,0.8)] transition-all hover:scale-110 active:scale-95 cursor-pointer"
+                    className="pointer-events-auto grid h-16 w-16 xs:h-20 xs:w-20 sm:h-24 sm:w-24 place-items-center rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black shadow-[0_0_40px_rgba(0,240,118,0.8)] transition-all hover:scale-110 active:scale-95 cursor-pointer"
                     aria-label="Play video"
                   >
-                    <Play className="h-9 w-9 sm:h-11 sm:w-11 fill-black translate-x-1" />
+                    <Play className="h-8 w-8 sm:h-11 sm:w-11 fill-black translate-x-1" />
                   </button>
                 </div>
               )}
 
               {/* Custom Bottom Overlay with Progression Line & Action Controls */}
               <div
-                className={`absolute bottom-0 inset-x-0 z-30 p-3 sm:p-5 bg-gradient-to-t from-black/90 via-black/50 to-transparent transition-opacity duration-300 ${
+                className={`absolute bottom-0 inset-x-0 z-30 p-2.5 xs:p-3 sm:p-5 bg-gradient-to-t from-black/95 via-black/60 to-transparent transition-opacity duration-300 ${
                   showControls || !isPlaying ? "opacity-100" : "opacity-0 pointer-events-none"
                 }`}
               >
                 {/* Top Progression Bar of the Video Overlay (Slim flowing line) */}
-                <div className="w-full h-1.5 rounded-full bg-white/20 overflow-hidden mb-3 shadow-inner">
+                <div className="w-full h-1.5 sm:h-2 rounded-full bg-white/20 overflow-hidden mb-2.5 sm:mb-3 shadow-inner">
                   <div
                     className="h-full rounded-full progress-water-flow shadow-[0_0_10px_rgba(0,240,118,0.8)] transition-all duration-300"
                     style={{ width: `${pct}%` }}
                   />
                 </div>
 
-                {/* Action Buttons Row (No timeline seconds shown) */}
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
+                {/* Action Buttons Row */}
+                <div className="flex items-center justify-between gap-2 sm:gap-3">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     {/* Play / Pause Toggle Button */}
                     <button
                       type="button"
                       onClick={togglePlay}
-                      className="flex items-center gap-1.5 rounded-full bg-black/70 hover:bg-black/90 text-white px-3.5 py-1.5 text-xs font-semibold backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
+                      className="flex items-center gap-1 sm:gap-1.5 rounded-full bg-black/75 hover:bg-black text-white px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                     >
                       {isPlaying ? (
                         <>
@@ -423,7 +490,7 @@ export function TrainingScreen() {
                     <button
                       type="button"
                       onClick={handleRewind10}
-                      className="flex items-center gap-1.5 rounded-full bg-black/70 hover:bg-black/90 text-white px-3 py-1.5 text-xs font-semibold backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
+                      className="flex items-center gap-1 rounded-full bg-black/75 hover:bg-black text-white px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                       title="Rewind 10 seconds"
                       aria-label="Rewind 10 seconds"
                     >
@@ -435,7 +502,7 @@ export function TrainingScreen() {
                     <button
                       type="button"
                       onClick={toggleMute}
-                      className="flex items-center gap-1.5 rounded-full bg-black/70 hover:bg-black/90 text-white px-3 py-1.5 text-xs font-semibold backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
+                      className="flex items-center gap-1 rounded-full bg-black/75 hover:bg-black text-white px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                     >
                       {isMuted ? (
                         <>
@@ -456,7 +523,7 @@ export function TrainingScreen() {
                     <button
                       type="button"
                       onClick={toggleFullscreen}
-                      className="grid h-8 w-8 place-items-center rounded-full bg-black/70 hover:bg-black/90 text-white backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
+                      className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                       title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                       aria-label={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                     >

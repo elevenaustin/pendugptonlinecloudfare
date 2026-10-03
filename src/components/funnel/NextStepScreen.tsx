@@ -70,6 +70,7 @@ export function NextStepScreen() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEnded, setIsEnded] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -97,6 +98,24 @@ export function NextStepScreen() {
     return () => clearTimeout(timer);
   }, []);
 
+  const triggerControlsAutoHide = () => {
+    setShowControls(true);
+    if (hideControlsTimerRef.current) {
+      clearTimeout(hideControlsTimerRef.current);
+    }
+    hideControlsTimerRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 2500);
+  };
+
+  const handleUserActivity = () => {
+    if (isPlaying) {
+      triggerControlsAutoHide();
+    } else {
+      setShowControls(true);
+    }
+  };
+
   // Initialize Vimeo Player with reliable autoplay & controls
   useEffect(() => {
     if (!isCompleted) return;
@@ -119,6 +138,7 @@ export function NextStepScreen() {
             await playerInstance?.play();
             setIsPlaying(true);
             setIsEnded(false);
+            triggerControlsAutoHide();
           } catch {
             // If browser blocks unmuted autoplay, mute and autoplay
             try {
@@ -127,6 +147,7 @@ export function NextStepScreen() {
               await playerInstance?.play();
               setIsPlaying(true);
               setIsEnded(false);
+              triggerControlsAutoHide();
             } catch {
               /* ignore */
             }
@@ -139,11 +160,13 @@ export function NextStepScreen() {
       playerInstance.on("play", () => {
         setIsPlaying(true);
         setIsEnded(false);
+        triggerControlsAutoHide();
       });
 
       playerInstance.on("pause", () => {
         setIsPlaying(false);
         setShowControls(true);
+        if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       });
 
       playerInstance.on("timeupdate", (data: { seconds: number; duration: number }) => {
@@ -160,7 +183,27 @@ export function NextStepScreen() {
       console.warn("Vimeo player init warning:", err);
     }
 
+    const handleFullscreenChange = () => {
+      const doc: any = document;
+      const isFull = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+      setIsFullscreen(isFull);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
+
     return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
       if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       if (playerInstance) {
         playerInstance.unload().catch(() => {});
@@ -169,6 +212,7 @@ export function NextStepScreen() {
   }, [nextStepVimeoId, isCompleted]);
 
   const togglePlay = async () => {
+    handleUserActivity();
     let player = playerRef.current;
     if (!player && iframeRef.current) {
       try {
@@ -194,9 +238,12 @@ export function NextStepScreen() {
         await player.play();
         setIsPlaying(true);
         setIsEnded(false);
+        triggerControlsAutoHide();
       } else {
         await player.pause();
         setIsPlaying(false);
+        setShowControls(true);
+        if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       }
     } catch {
       /* fallback */
@@ -204,6 +251,7 @@ export function NextStepScreen() {
   };
 
   const handleRewind10 = async () => {
+    handleUserActivity();
     if (!playerRef.current) return;
     try {
       const cur = await playerRef.current.getCurrentTime();
@@ -214,6 +262,7 @@ export function NextStepScreen() {
   };
 
   const handleReplayVideo = async () => {
+    handleUserActivity();
     let player = playerRef.current;
     if (!player && iframeRef.current) {
       try {
@@ -236,6 +285,7 @@ export function NextStepScreen() {
         await player.play();
         setIsEnded(false);
         setIsPlaying(true);
+        triggerControlsAutoHide();
         return;
       } catch {
         /* fallback to iframe reload */
@@ -247,10 +297,12 @@ export function NextStepScreen() {
       iframeRef.current.src = `https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=0&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`;
       setIsEnded(false);
       setIsPlaying(true);
+      triggerControlsAutoHide();
     }
   };
 
   const handleToggleMute = async () => {
+    handleUserActivity();
     if (playerRef.current) {
       try {
         const muted = await playerRef.current.getMuted();
@@ -263,26 +315,49 @@ export function NextStepScreen() {
   };
 
   const handleToggleFullscreen = async () => {
-    const el = videoContainerRef.current;
-    if (!el) return;
-    try {
-      if (!document.fullscreenElement) {
-        await el.requestFullscreen();
-      } else {
-        await document.exitFullscreen();
-      }
-    } catch {
-      /* ignore */
-    }
-  };
+    handleUserActivity();
+    const container = videoContainerRef.current;
+    if (!container) return;
 
-  const handleMouseMove = () => {
-    setShowControls(true);
-    if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
-    if (isPlaying) {
-      hideControlsTimerRef.current = setTimeout(() => {
-        setShowControls(false);
-      }, 2500);
+    const doc: any = document;
+    const isCurrentlyFull = !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    );
+
+    try {
+      if (!isCurrentlyFull && !isFullscreen) {
+        setIsFullscreen(true);
+        if (container.requestFullscreen) {
+          await container.requestFullscreen().catch(() => {});
+        } else if ((container as any).webkitRequestFullscreen) {
+          (container as any).webkitRequestFullscreen();
+        } else if ((container as any).mozRequestFullScreen) {
+          (container as any).mozRequestFullScreen();
+        } else if ((container as any).msRequestFullscreen) {
+          (container as any).msRequestFullscreen();
+        } else if (playerRef.current) {
+          await playerRef.current.requestFullscreen().catch(() => {});
+        }
+      } else {
+        setIsFullscreen(false);
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen().catch(() => {});
+        } else if (doc.webkitExitFullscreen) {
+          doc.webkitExitFullscreen();
+        } else if (doc.mozCancelFullScreen) {
+          doc.mozCancelFullScreen();
+        } else if (doc.msExitFullscreen) {
+          doc.msExitFullscreen();
+        } else if (playerRef.current) {
+          await playerRef.current.exitFullscreen().catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn("Fullscreen toggle fallback:", err);
+      setIsFullscreen((prev) => !prev);
     }
   };
 
@@ -372,15 +447,25 @@ export function NextStepScreen() {
             </div>
 
             {/* Video Preview Section (Clean, Cinema-Grade Player with Zero Clutter & Zero Vimeo Icons) */}
-            <div className="mx-auto max-w-3xl">
+            <div className="relative group/player mx-auto max-w-3xl w-full">
+              {/* Radiant Ambient Glow Behind Video */}
+              <div className="pointer-events-none absolute -inset-2 sm:-inset-3 rounded-[32px] sm:rounded-[40px] bg-gradient-to-r from-[#00F076]/30 via-[#00D668]/20 to-[#00F076]/30 blur-2xl opacity-75 group-hover/player:opacity-100 transition-opacity duration-500" />
+
               <div
                 ref={videoContainerRef}
-                onMouseMove={handleMouseMove}
+                onMouseMove={handleUserActivity}
+                onTouchStart={handleUserActivity}
+                onTouchMove={handleUserActivity}
+                onClick={handleUserActivity}
                 onMouseLeave={() => isPlaying && setShowControls(false)}
-                className="relative overflow-hidden rounded-3xl border-2 border-[#00F076]/40 bg-gradient-to-b from-[#081e13] via-[#04120a] to-[#020905] p-2 sm:p-2.5 shadow-[0_0_60px_rgba(0,240,118,0.25)]"
+                className={`relative overflow-hidden transition-all duration-300 ${
+                  isFullscreen
+                    ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex items-center justify-center p-0 rounded-none"
+                    : "rounded-[20px] xs:rounded-[26px] sm:rounded-[32px] glass-card p-1.5 xs:p-2.5 sm:p-4 md:p-5 border-2 border-[#00F076]/40 shadow-[0_0_60px_rgba(0,240,118,0.25)]"
+                }`}
               >
                 {/* Vimeo Embed with ALL Native Controls & Sidedock COMPLETELY REMOVED */}
-                <div className="relative aspect-video w-full overflow-hidden rounded-2xl bg-[#020503] shadow-2xl">
+                <div className="relative aspect-video w-full overflow-hidden rounded-xl sm:rounded-2xl bg-[#020503] shadow-2xl">
                   <iframe
                     ref={iframeRef}
                     src={`https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=1&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`}
@@ -402,22 +487,22 @@ export function NextStepScreen() {
                       <button
                         type="button"
                         onClick={togglePlay}
-                        className="pointer-events-auto grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black shadow-[0_0_40px_rgba(0,240,118,0.85)] transition-all hover:scale-110 active:scale-95 cursor-pointer"
+                        className="pointer-events-auto grid h-16 w-16 xs:h-20 xs:w-20 sm:h-24 sm:w-24 place-items-center rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black shadow-[0_0_40px_rgba(0,240,118,0.85)] transition-all hover:scale-110 active:scale-95 cursor-pointer"
                         aria-label="Play video"
                       >
-                        <Play className="h-7 w-7 sm:h-9 sm:w-9 fill-black translate-x-0.5" />
+                        <Play className="h-8 w-8 sm:h-11 sm:w-11 fill-black translate-x-1" />
                       </button>
                     </div>
                   )}
 
-                  {/* Custom Clean Bottom Control Bar (Hidden when inactive) */}
+                  {/* Custom Clean Bottom Control Bar (Hidden after 2.5s of no activity) */}
                   <div
-                    className={`absolute bottom-0 inset-x-0 z-30 p-2.5 sm:p-4 bg-gradient-to-t from-black/95 via-black/60 to-transparent transition-opacity duration-300 ${
+                    className={`absolute bottom-0 inset-x-0 z-30 p-2.5 xs:p-3 sm:p-5 bg-gradient-to-t from-black/95 via-black/60 to-transparent transition-opacity duration-300 ${
                       showControls || !isPlaying ? "opacity-100" : "opacity-0 pointer-events-none"
                     }`}
                   >
                     {/* Glowing Progress Bar */}
-                    <div className="w-full h-1.5 rounded-full bg-white/20 overflow-hidden mb-2.5 shadow-inner">
+                    <div className="w-full h-1.5 sm:h-2 rounded-full bg-white/20 overflow-hidden mb-2.5 sm:mb-3 shadow-inner">
                       <div
                         className="h-full rounded-full progress-water-flow shadow-[0_0_10px_rgba(0,240,118,0.8)] transition-all duration-200"
                         style={{ width: `${progressPct}%` }}
@@ -426,22 +511,22 @@ export function NextStepScreen() {
 
                     {/* Custom Action Buttons Row */}
                     <div className="flex items-center justify-between gap-2 text-white">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 sm:gap-2">
                         {/* Play/Pause Button */}
                         <button
                           type="button"
                           onClick={togglePlay}
-                          className="flex items-center gap-1 rounded-full bg-black/70 hover:bg-black/90 text-white px-3 py-1.5 text-xs font-semibold backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
+                          className="flex items-center gap-1 sm:gap-1.5 rounded-full bg-black/75 hover:bg-black text-white px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                         >
                           {isPlaying ? (
                             <>
                               <span className="h-3 w-3 text-[#00F076] font-bold">❚❚</span>
-                              <span className="hidden xs:inline">Pause</span>
+                              <span>Pause</span>
                             </>
                           ) : (
                             <>
-                              <Play className="h-3 w-3 text-[#00F076] fill-current" />
-                              <span className="hidden xs:inline">Play</span>
+                              <Play className="h-3.5 w-3.5 text-[#00F076] fill-current" />
+                              <span>Play</span>
                             </>
                           )}
                         </button>
@@ -450,16 +535,16 @@ export function NextStepScreen() {
                         <button
                           type="button"
                           onClick={handleRewind10}
-                          className="flex items-center gap-1 rounded-full bg-black/70 hover:bg-black/90 text-white px-2.5 py-1.5 text-xs font-semibold backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
+                          className="flex items-center gap-1 rounded-full bg-black/75 hover:bg-black text-white px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                           title="Rewind 10 seconds"
                         >
-                          <RotateCcw className="h-3 w-3 text-[#00F076]" />
-                          <span className="text-[11px]">-10s</span>
+                          <RotateCcw className="h-3.5 w-3.5 text-[#00F076]" />
+                          <span>-10s</span>
                         </button>
 
                         {/* Time display */}
                         {duration > 0 && (
-                          <span className="text-[10px] sm:text-xs text-white/80 font-mono pl-1">
+                          <span className="text-[10px] sm:text-xs text-white/80 font-mono pl-1 hidden xs:inline">
                             {formatTime(currentTime)} / {formatTime(duration)}
                           </span>
                         )}
@@ -470,24 +555,30 @@ export function NextStepScreen() {
                         <button
                           type="button"
                           onClick={handleToggleMute}
-                          className="grid h-8 w-8 place-items-center rounded-full bg-black/70 hover:bg-black/90 text-white backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
+                          className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                           title={isMuted ? "Unmute" : "Mute"}
+                          aria-label={isMuted ? "Unmute" : "Mute"}
                         >
                           {isMuted ? (
-                            <VolumeX className="h-3.5 w-3.5 text-red-400" />
+                            <VolumeX className="h-3.5 w-3.5 text-amber-400" />
                           ) : (
                             <Volume2 className="h-3.5 w-3.5 text-[#00F076]" />
                           )}
                         </button>
 
-                        {/* Fullscreen */}
+                        {/* 1-Click Universal Fullscreen */}
                         <button
                           type="button"
                           onClick={handleToggleFullscreen}
-                          className="grid h-8 w-8 place-items-center rounded-full bg-black/70 hover:bg-black/90 text-white backdrop-blur-md border border-white/15 hover:border-[#00F076]/50 shadow-md transition-all active:scale-95 cursor-pointer"
-                          title="Fullscreen"
+                          className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
+                          title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+                          aria-label={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                         >
-                          <Maximize className="h-3.5 w-3.5 text-white/90" />
+                          {isFullscreen ? (
+                            <Minimize className="h-4 w-4 text-[#00F076]" />
+                          ) : (
+                            <Maximize className="h-4 w-4 text-[#00F076]" />
+                          )}
                         </button>
                       </div>
                     </div>
