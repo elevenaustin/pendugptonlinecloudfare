@@ -1,19 +1,20 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import {
+  ArrowRight,
   Check,
   CheckCircle2,
-  ChevronDown,
   ExternalLink,
+  Flame,
   Loader2,
   Lock,
+  MessageSquare,
   RotateCcw,
-  Search,
   ShieldAlert,
   ShieldCheck,
   Sparkles,
   X,
-  ArrowRight,
+  Zap,
 } from "lucide-react";
 import {
   Dialog,
@@ -32,46 +33,6 @@ import { track } from "@/lib/analytics";
 
 export type CheckoutTier = "live" | "recorded";
 
-interface Country {
-  name: string;
-  code: string;
-  flag: string;
-  sampleLength?: number;
-}
-
-const countries: Country[] = [
-  { name: "India", code: "+91", flag: "🇮🇳", sampleLength: 10 },
-  { name: "United States", code: "+1", flag: "🇺🇸", sampleLength: 10 },
-  { name: "United Kingdom", code: "+44", flag: "🇬🇧", sampleLength: 10 },
-  { name: "United Arab Emirates", code: "+971", flag: "🇦🇪", sampleLength: 9 },
-  { name: "Canada", code: "+1", flag: "🇨🇦", sampleLength: 10 },
-  { name: "Australia", code: "+61", flag: "🇦🇺", sampleLength: 9 },
-  { name: "Singapore", code: "+65", flag: "🇸🇬", sampleLength: 8 },
-  { name: "Saudi Arabia", code: "+966", flag: "🇸🇦", sampleLength: 9 },
-  { name: "Germany", code: "+49", flag: "🇩🇪", sampleLength: 10 },
-  { name: "France", code: "+33", flag: "🇫🇷", sampleLength: 9 },
-  { name: "Pakistan", code: "+92", flag: "🇵🇰", sampleLength: 10 },
-  { name: "Bangladesh", code: "+880", flag: "🇧🇩", sampleLength: 10 },
-  { name: "Nepal", code: "+977", flag: "🇳🇵", sampleLength: 10 },
-  { name: "Sri Lanka", code: "+94", flag: "🇱🇰", sampleLength: 9 },
-  { name: "Qatar", code: "+974", flag: "🇶🇦", sampleLength: 8 },
-  { name: "Kuwait", code: "+965", flag: "🇰🇼", sampleLength: 8 },
-  { name: "Oman", code: "+968", flag: "🇴🇲", sampleLength: 8 },
-  { name: "Bahrain", code: "+973", flag: "🇧🇭", sampleLength: 8 },
-  { name: "Malaysia", code: "+60", flag: "🇲🇾", sampleLength: 9 },
-  { name: "New Zealand", code: "+64", flag: "🇳🇿", sampleLength: 9 },
-  { name: "South Africa", code: "+27", flag: "🇿🇦", sampleLength: 9 },
-  { name: "Indonesia", code: "+62", flag: "🇮🇩", sampleLength: 10 },
-  { name: "Philippines", code: "+63", flag: "🇵🇭", sampleLength: 10 },
-  { name: "Ireland", code: "+353", flag: "🇮🇪", sampleLength: 9 },
-  { name: "Netherlands", code: "+31", flag: "🇳🇱", sampleLength: 9 },
-  { name: "Italy", code: "+39", flag: "🇮🇹", sampleLength: 10 },
-  { name: "Spain", code: "+34", flag: "🇪🇸", sampleLength: 9 },
-  { name: "Brazil", code: "+55", flag: "🇧🇷", sampleLength: 11 },
-  { name: "Nigeria", code: "+234", flag: "🇳🇬", sampleLength: 10 },
-  { name: "Kenya", code: "+254", flag: "🇰🇪", sampleLength: 9 },
-];
-
 interface RazorpayCheckoutDialogProps {
   tier: CheckoutTier | null;
   onClose: () => void;
@@ -81,80 +42,53 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
   const savePayment = useServerFn(recordPayment);
   const createOrder = useServerFn(createRazorpayOrder);
 
-  const [phone, setPhone] = useState("");
-  const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]);
-  const [countryModalOpen, setCountryModalOpen] = useState(false);
-  const [countrySearch, setCountrySearch] = useState("");
-
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState<"form" | "processing" | "failed" | "success">("form");
+  const [status, setStatus] = useState<"launching" | "failed" | "success">("launching");
   const [failureReason, setFailureReason] = useState("");
   const [completedPayment, setCompletedPayment] = useState<PaymentDetails | null>(null);
   const [countdown, setCountdown] = useState(3);
   const redirectTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isLaunchingRef = useRef(false);
 
-  // Keep phone field clean and empty for user to enter their own number
-  useEffect(() => {
-    if (tier && typeof window !== "undefined") {
+  const courseConfig = tier === "recorded" ? siteConfig.courses.recorded : siteConfig.courses.live;
+  const isRecorded = tier === "recorded";
+
+  // Handle Close & Reset
+  const handleClose = () => {
+    if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+    isLaunchingRef.current = false;
+    onClose();
+    setTimeout(() => {
+      setStatus("launching");
+      setFailureReason("");
+      setCompletedPayment(null);
+      setCountdown(3);
+    }, 250);
+  };
+
+  // Launch Razorpay directly in 1 CLICK
+  const startRazorpayCheckout = async () => {
+    if (!tier || isLaunchingRef.current) return;
+    isLaunchingRef.current = true;
+    setStatus("launching");
+
+    // Fetch registered phone from phase 1 if available
+    let registeredPhone = "";
+    if (typeof window !== "undefined") {
       try {
         const stored = localStorage.getItem(siteConfig.video.registrationKey);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed.countryCode) {
-            const matched = countries.find((c) => c.code === parsed.countryCode);
-            if (matched) setSelectedCountry(matched);
-          }
+          if (parsed.whatsapp) registeredPhone = parsed.whatsapp.replace(/\D/g, "");
         }
       } catch {
         /* ignore */
       }
     }
-  }, [tier]);
 
-  const courseConfig = tier === "recorded" ? siteConfig.courses.recorded : siteConfig.courses.live;
-  const isRecorded = tier === "recorded";
-
-  const filteredCountries = useMemo(() => {
-    if (!countrySearch.trim()) return countries;
-    const q = countrySearch.toLowerCase().trim();
-    return countries.filter((c) => c.name.toLowerCase().includes(q) || c.code.includes(q));
-  }, [countrySearch]);
-
-  // Handle Close & Reset
-  const handleClose = () => {
-    if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
-    onClose();
-    setTimeout(() => {
-      setStatus("form");
-      setError("");
-      setFailureReason("");
-      setCompletedPayment(null);
-      setCountryModalOpen(false);
-      setCountrySearch("");
-      setCountdown(3);
-    }, 250);
-  };
-
-  // Start Razorpay Payment Flow
-  const handlePayNow = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-
-    const cleanPhone = phone.replace(/\D/g, "");
-    const minLength = selectedCountry.sampleLength || 8;
-    if (!cleanPhone || cleanPhone.length < minLength) {
-      setError(`Please enter a valid ${minLength}-digit mobile number for ${selectedCountry.name}`);
-      return;
-    }
-
-    const fullInternationalPhone = `${selectedCountry.code} ${cleanPhone}`;
-
-    setError("");
-    setStatus("processing");
     track("checkout_payment_initiated", {
       tier,
       amount: courseConfig.price,
-      phone: fullInternationalPhone,
-      country: selectedCountry.code,
+      phone: registeredPhone,
     });
 
     try {
@@ -173,9 +107,9 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         const orderRes = await createOrder({
           data: {
             amountInPaise,
-            track: tier || "recorded",
+            track: tier,
             trackName: courseConfig.name,
-            phone: fullInternationalPhone,
+            phone: registeredPhone || "9876543210",
           },
         });
         if (orderRes?.ok && orderRes.orderId) {
@@ -194,10 +128,14 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         description: `${courseConfig.name} — Lifetime Access`,
         image: siteConfig.logo,
         order_id: serverOrderId,
-        prefill: {
-          contact: `${selectedCountry.code.replace("+", "")}${cleanPhone}`,
-          name: "PenduGPT Learner",
-        },
+        prefill: registeredPhone
+          ? {
+              contact: registeredPhone,
+              name: "PenduGPT Learner",
+            }
+          : {
+              name: "PenduGPT Learner",
+            },
         theme: {
           color: isRecorded ? "#FFE600" : "#00F076",
         },
@@ -223,16 +161,18 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         },
         modal: {
           ondismiss: function () {
-            handlePaymentFailure("Payment window was closed before completion.");
+            isLaunchingRef.current = false;
+            handlePaymentFailure("Payment window was cancelled or closed.");
           },
         },
         handler: async function (response: any) {
+          isLaunchingRef.current = false;
           if (response.razorpay_payment_id) {
             await handlePaymentSuccess({
               paymentId: response.razorpay_payment_id,
               orderId: response.razorpay_order_id || serverOrderId || orderRef,
               signature: response.razorpay_signature,
-              fullPhone: fullInternationalPhone,
+              fullPhone: registeredPhone || "+91 Customer",
             });
           } else {
             handlePaymentFailure("Payment verification could not be confirmed.");
@@ -247,6 +187,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
       const rzp = new window.Razorpay(options);
 
       rzp.on("payment.failed", function (response: any) {
+        isLaunchingRef.current = false;
         const desc =
           response.error?.description ||
           response.error?.reason ||
@@ -256,6 +197,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
 
       rzp.open();
     } catch (err) {
+      isLaunchingRef.current = false;
       console.warn("Razorpay opening error:", err);
       handlePaymentFailure(
         err instanceof Error
@@ -265,7 +207,14 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
     }
   };
 
-  // Payment Failure Handler
+  // Launch on initial mount when tier is selected
+  useEffect(() => {
+    if (tier) {
+      startRazorpayCheckout();
+    }
+  }, [tier]);
+
+  // Payment Failure / Cancellation Handler
   const handlePaymentFailure = (reason: string) => {
     setStatus("failed");
     setFailureReason(reason);
@@ -284,7 +233,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
     signature?: string;
     fullPhone?: string;
   }) => {
-    const contactPhone = fullPhone || `${selectedCountry.code} ${phone}`;
+    const contactPhone = fullPhone || "Learner Phone";
 
     const paymentData: PaymentDetails = {
       paymentId,
@@ -356,21 +305,11 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
     }
   };
 
-  // Simulation test mode for developer preview
-  const handleSimulateTestPayment = async () => {
-    const simulatedPaymentId = `pay_sim_${Date.now().toString().slice(-8)}`;
-    await handlePaymentSuccess({
-      paymentId: simulatedPaymentId,
-      orderId: `ORD_SIM_${Date.now()}`,
-      fullPhone: `${selectedCountry.code} ${phone || "9876543210"}`,
-    });
-  };
-
   if (!tier) return null;
 
   return (
     <Dialog open={!!tier} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent className="border border-[#00F076]/30 bg-[#070b08]/98 p-5 sm:p-8 backdrop-blur-2xl sm:max-w-[460px] rounded-[24px] sm:rounded-[32px] shadow-[0_0_60px_rgba(0,0,0,0.9)] text-white">
+      <DialogContent className="border border-[#00F076]/30 bg-[#070b08]/98 p-5 sm:p-7 backdrop-blur-2xl sm:max-w-[480px] rounded-[24px] sm:rounded-[32px] shadow-[0_0_60px_rgba(0,0,0,0.9)] text-white">
         {/* =========================================================================
             STATE 1: SUCCESSFUL PAYMENT & AUTO WHATSAPP REDIRECTION
             ========================================================================= */}
@@ -412,10 +351,6 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                 <span className="font-sans">Amount Paid:</span>
                 <span className="font-bold text-white">{completedPayment.amount}</span>
               </div>
-              <div className="flex justify-between text-white/70">
-                <span className="font-sans">WhatsApp:</span>
-                <span className="text-white">{completedPayment.whatsapp}</span>
-              </div>
             </div>
 
             {/* WhatsApp Auto-Redirect Notice */}
@@ -440,49 +375,121 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
           </div>
         ) : status === "failed" ? (
           /* =========================================================================
-             STATE 2: PAYMENT FAILED / CANCELLED / INCOMPLETE (WITH RETRY BUTTON)
+             STATE 2: PAYMENT CANCELLED / DECLINED — TAILORED CLASS RETRY POPUP
              ========================================================================= */
           <div className="py-2 text-center animate-reveal">
-            <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-red-950/60 border-2 border-red-500/50 text-red-400 shadow-[0_0_25px_rgba(239,68,68,0.4)]">
-              <ShieldAlert className="h-8 w-8" />
+            {/* Class Specific Badge */}
+            <div className="flex items-center justify-between pb-1">
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider ${
+                  isRecorded
+                    ? "bg-[#FFE600]/20 border border-[#FFE600]/40 text-[#FFE600]"
+                    : "bg-[#00F076]/20 border border-[#00F076]/40 text-[#00F076]"
+                }`}
+              >
+                {isRecorded ? (
+                  <>
+                    <span>✦</span>
+                    <span>{courseConfig.badge}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="h-2 w-2 rounded-full bg-red-500 animate-ping shrink-0" />
+                    <span>{courseConfig.badge}</span>
+                  </>
+                )}
+              </span>
+
+              <span className="rounded-lg border border-red-500/40 bg-red-950/60 px-2.5 py-0.5 text-[9.5px] font-black uppercase tracking-wider text-red-400">
+                {courseConfig.discount}
+              </span>
             </div>
 
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/20 border border-red-500/30 px-3.5 py-1 text-[10px] font-black uppercase tracking-wider text-red-400 mt-4">
-              <span>PAYMENT NOT COMPLETED</span>
-            </span>
+            {/* Warning Icon */}
+            <div className="mx-auto mt-3 grid h-14 w-14 place-items-center rounded-2xl bg-amber-950/60 border-2 border-amber-500/50 text-amber-400 shadow-[0_0_25px_rgba(245,158,11,0.35)]">
+              <ShieldAlert className="h-7 w-7" />
+            </div>
 
-            <h3 className="mt-2 text-xl font-display font-black text-white">
+            {/* Heading */}
+            <DialogTitle className="mt-3 text-xl sm:text-2xl font-display font-black text-white leading-tight">
               Payment Incomplete or Cancelled
-            </h3>
+            </DialogTitle>
 
-            <p className="mt-1.5 text-xs text-white/75 leading-relaxed max-w-sm mx-auto">
-              {failureReason ||
-                "Your payment was cancelled or not confirmed by the bank. No money was deducted. Your mentorship seat is temporarily held."}
+            <p className="mt-1 text-xs text-white/75 leading-relaxed max-w-sm mx-auto">
+              Your enrollment for <strong className="text-white">{courseConfig.name}</strong> was
+              not completed. No money was deducted from your account.
             </p>
 
-            {/* Retry Action Box */}
-            <div className="mt-5 space-y-3">
-              <button
-                onClick={() => handlePayNow()}
-                className="group flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-4 text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.6)] hover:scale-[1.02] transition-all cursor-pointer"
-              >
-                <RotateCcw className="h-4 w-4" />
-                <span>Retry Payment ({courseConfig.price})</span>
-              </button>
+            {/* Tailored Class Offer Recap Box */}
+            <div
+              className={`mt-4 rounded-2xl border p-4 text-left shadow-inner ${
+                isRecorded
+                  ? "border-[#FFE600]/30 bg-[#161302]/80"
+                  : "border-[#00F076]/30 bg-[#061c11]/80"
+              }`}
+            >
+              <div className="flex items-baseline justify-between">
+                <span className="text-xs font-black uppercase tracking-wider text-white/70">
+                  {courseConfig.name}
+                </span>
+                <div className="flex items-baseline gap-1.5">
+                  <span
+                    className={`font-display font-black text-2xl ${
+                      isRecorded ? "text-[#FFE600]" : "text-[#00F076]"
+                    }`}
+                  >
+                    {courseConfig.price}
+                  </span>
+                  <span className="text-xs line-through text-white/40">
+                    {courseConfig.originalPrice}
+                  </span>
+                </div>
+              </div>
 
+              <div className="mt-2.5 space-y-1.5 border-t border-white/10 pt-2.5 text-xs text-white/90">
+                {courseConfig.features.slice(0, 3).map((feat, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Check
+                      className={`h-3.5 w-3.5 shrink-0 stroke-[3] ${
+                        isRecorded ? "text-[#FFE600]" : "text-[#00F076]"
+                      }`}
+                    />
+                    <span className="text-[11px] leading-tight text-white/90 font-medium">
+                      {feat}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-3 flex items-center justify-between rounded-xl bg-black/50 px-3 py-1.5 text-[10.5px] font-bold text-amber-300 border border-amber-500/20">
+                <span>⏳ Seat &amp; Discount Held:</span>
+                <span className="font-mono font-black text-white">Next 10 Minutes</span>
+              </div>
+            </div>
+
+            {/* Retry Action Box */}
+            <div className="mt-5 space-y-2.5">
               <button
-                onClick={handleSimulateTestPayment}
-                className="w-full text-center text-[10.5px] text-white/40 hover:text-white/70 py-1 transition-colors underline cursor-pointer"
+                type="button"
+                onClick={startRazorpayCheckout}
+                className={`group flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-sm font-display font-black uppercase tracking-wider text-black shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
+                  isRecorded
+                    ? "bg-gradient-to-r from-[#FFE600] via-[#fff055] to-[#f4dc00] shadow-[0_0_30px_rgba(255,230,0,0.65)] hover:shadow-[0_0_45px_rgba(255,230,0,0.9)]"
+                    : "bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] shadow-[0_0_30px_rgba(0,240,118,0.65)] hover:shadow-[0_0_45px_rgba(0,240,118,0.9)]"
+                }`}
               >
-                [Test Mode] Simulate Payment Success & WhatsApp
+                <RotateCcw className="h-4 w-4 stroke-[2.5]" />
+                <span>Retry Payment — Flat {courseConfig.price}</span>
+                <ArrowRight className="h-4 w-4 stroke-[2.5] transition-transform group-hover:translate-x-1" />
               </button>
 
               <div className="pt-2 border-t border-white/10 flex items-center justify-between text-xs text-white/60">
                 <button
-                  onClick={() => setStatus("form")}
-                  className="hover:text-white transition-colors cursor-pointer"
+                  type="button"
+                  onClick={handleClose}
+                  className="hover:text-white transition-colors cursor-pointer text-xs"
                 >
-                  ← Change Details
+                  ✕ Close Window
                 </button>
                 <a
                   href={`https://wa.me/917717526430?text=${encodeURIComponent(
@@ -490,173 +497,35 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                   )}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="text-[#00F076] hover:underline font-semibold"
+                  className="text-[#00F076] hover:underline font-bold inline-flex items-center gap-1"
                 >
-                  Need Help? WhatsApp Us
+                  <MessageSquare className="h-3.5 w-3.5" />
+                  <span>Need Help? WhatsApp Us</span>
                 </a>
               </div>
             </div>
           </div>
         ) : (
           /* =========================================================================
-             STATE 3: CLEAN MOBILE ENTRY WITH FULL COUNTRY CODE SELECTOR
+             STATE 3: 1-CLICK LAUNCHING STATE (CONNECTING TO RAZORPAY)
              ========================================================================= */
-          <div className="relative animate-reveal">
-            {/* Top Pill Badge matching theme */}
-            <div className="inline-flex items-center gap-1.5 rounded-full border border-[#00F076]/40 bg-[#072416] px-3.5 py-1 text-[11px] font-black tracking-wide text-[#00F076] shadow-[0_0_15px_rgba(0,240,118,0.2)] mb-3">
-              <Sparkles className="h-3.5 w-3.5 text-[#00F076]" />
-              <span>
-                {isRecorded
-                  ? "COMPLETE MASTERCLASS • FLAT ₹2,499"
-                  : "LIVE MASTERCLASS • FLAT ₹5,999"}
-              </span>
+          <div className="py-8 text-center animate-reveal">
+            <div className="mx-auto grid h-16 w-16 place-items-center rounded-2xl bg-[#072416] border-2 border-[#00F076] text-[#00F076] shadow-[0_0_30px_rgba(0,240,118,0.4)] mb-4">
+              <Loader2 className="h-8 w-8 animate-spin" />
             </div>
 
-            {/* Heading */}
-            <DialogTitle className="font-display font-black text-2xl sm:text-3xl text-white tracking-tight leading-tight">
-              Enter WhatsApp Number
+            <DialogTitle className="font-display font-black text-xl sm:text-2xl text-white">
+              Opening Razorpay Gateway...
             </DialogTitle>
 
-            {/* Subtitle */}
-            <p className="mt-2 text-xs sm:text-sm text-white/70 leading-relaxed">
-              {isRecorded
-                ? "Instant access to Complete Masterclass (all recorded sessions) & Drive vault will be sent to your WhatsApp."
-                : "Instant access to Live Interactive Masterclass sessions & VIP community will be sent to your WhatsApp."}
+            <p className="mt-1.5 text-xs text-white/70 max-w-xs mx-auto">
+              Connecting to 100% PCI-DSS secure checkout for <strong>{courseConfig.name}</strong> ({courseConfig.price}).
             </p>
 
-            {/* Form */}
-            <form onSubmit={handlePayNow} className="mt-5 space-y-4" noValidate>
-              <div>
-                <label
-                  htmlFor="checkoutMobile"
-                  className="block text-[10.5px] font-black uppercase tracking-wider text-white/70 mb-2"
-                >
-                  WHATSAPP MOBILE NUMBER
-                </label>
-
-                {/* Number Input with Interactive Country Selector Dropdown */}
-                <div className="relative flex items-center rounded-2xl border-2 border-[#00F076] bg-[#050805] p-1.5 shadow-[0_0_20px_rgba(0,240,118,0.25)] focus-within:shadow-[0_0_30px_rgba(0,240,118,0.5)] transition-all">
-                  {/* Interactive Country Selector Trigger Button */}
-                  <button
-                    type="button"
-                    onClick={() => setCountryModalOpen(true)}
-                    className="flex items-center gap-1.5 rounded-xl bg-[#0a180e] hover:bg-[#00F076]/20 border border-[#00F076]/30 px-3 py-2 text-xs font-black text-white shrink-0 select-none transition-all cursor-pointer"
-                    title="Change country code"
-                  >
-                    <span className="text-sm">{selectedCountry.flag}</span>
-                    <span className="text-[#00F076] font-mono font-bold">{selectedCountry.code}</span>
-                    <ChevronDown className="h-3 w-3 text-white/60 ml-0.5" />
-                  </button>
-
-                  {/* Input field */}
-                  <input
-                    id="checkoutMobile"
-                    type="tel"
-                    inputMode="numeric"
-                    maxLength={selectedCountry.sampleLength ? selectedCountry.sampleLength + 2 : 12}
-                    autoFocus
-                    placeholder={selectedCountry.sampleLength === 10 ? "98765 43210" : "12345 67890"}
-                    value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value.replace(/\D/g, ""));
-                      if (error) setError("");
-                    }}
-                    className="w-full bg-transparent px-3 py-2 text-base sm:text-lg font-black font-mono text-white placeholder:text-white/25 outline-none tracking-wider"
-                  />
-                </div>
-                {error && <p className="mt-1.5 text-xs font-bold text-red-400 pl-1">{error}</p>}
-              </div>
-
-              {/* Glowing High-Converting CTA Button */}
-              <button
-                type="submit"
-                disabled={status === "processing"}
-                className="group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-4 px-6 text-sm sm:text-base font-display font-black tracking-wide text-black shadow-[0_0_35px_rgba(0,240,118,0.65)] hover:shadow-[0_0_50px_rgba(0,240,118,0.9)] hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer disabled:opacity-75 mt-4"
-              >
-                {status === "processing" ? (
-                  <>
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                    <span>Connecting Razorpay...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>Get Instant Access — Flat {courseConfig.price}</span>
-                    <ArrowRight className="h-4 w-4 sm:h-5 sm:w-5 stroke-[2.5] transition-transform group-hover:translate-x-1" />
-                  </>
-                )}
-              </button>
-
-              {/* Trust Badge */}
-              <div className="pt-2 text-center">
-                <p className="inline-flex items-center gap-1.5 text-xs font-bold text-white/70">
-                  <Lock className="h-3.5 w-3.5 text-[#00F076]" />
-                  <span>100% PCI-DSS Secure Razorpay Checkout</span>
-                </p>
-              </div>
-            </form>
-
-            {/* Country Selector Search Modal Overlay */}
-            {countryModalOpen && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-reveal">
-                <div className="w-full max-w-sm rounded-[24px] border border-[#00F076]/40 bg-[#070e09] p-5 shadow-[0_0_50px_rgba(0,0,0,0.9)] text-white">
-                  <div className="flex items-center justify-between pb-3 border-b border-white/10">
-                    <h4 className="font-display font-bold text-sm text-white">Select Country Code</h4>
-                    <button
-                      type="button"
-                      onClick={() => setCountryModalOpen(false)}
-                      className="p-1 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors cursor-pointer"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-
-                  {/* Country Search Bar */}
-                  <div className="relative mt-3">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-white/40" />
-                    <input
-                      type="text"
-                      placeholder="Search country or code (+91, +1)..."
-                      value={countrySearch}
-                      onChange={(e) => setCountrySearch(e.target.value)}
-                      className="w-full rounded-xl border border-white/15 bg-black/60 pl-9 pr-3 py-2 text-xs text-white placeholder:text-white/30 outline-none focus:border-[#00F076]"
-                      autoFocus
-                    />
-                  </div>
-
-                  {/* Scrollable Country List */}
-                  <div className="mt-3 max-h-56 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                    {filteredCountries.map((c) => {
-                      const isSelected = selectedCountry.code === c.code && selectedCountry.name === c.name;
-                      return (
-                        <button
-                          key={`${c.name}-${c.code}`}
-                          type="button"
-                          onClick={() => {
-                            setSelectedCountry(c);
-                            setCountryModalOpen(false);
-                            setCountrySearch("");
-                          }}
-                          className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs transition-all cursor-pointer ${
-                            isSelected
-                              ? "bg-[#00F076]/20 text-[#00F076] font-bold border border-[#00F076]/40"
-                              : "hover:bg-white/10 text-white"
-                          }`}
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <span className="text-base">{c.flag}</span>
-                            <span>{c.name}</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 font-mono">
-                            <span className="text-white/70">{c.code}</span>
-                            {isSelected && <Check className="h-3.5 w-3.5 text-[#00F076]" />}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="mt-6 flex items-center justify-center gap-1.5 text-[11px] font-bold text-white/50">
+              <Lock className="h-3 w-3 text-[#00F076]" />
+              <span>UPI • Google Pay • PhonePe • Cards • NetBanking</span>
+            </div>
           </div>
         )}
       </DialogContent>
