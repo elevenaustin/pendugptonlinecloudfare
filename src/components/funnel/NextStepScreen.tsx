@@ -66,7 +66,7 @@ export function NextStepScreen() {
   });
 
   const [selectedTier, setSelectedTier] = useState<CheckoutTier | null>(null);
-  const [showPricing, setShowPricing] = useState(false);
+  const [showPricing, setShowPricing] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isEnded, setIsEnded] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -76,27 +76,6 @@ export function NextStepScreen() {
   const [duration, setDuration] = useState(0);
 
   const pricingSectionRef = useRef<HTMLDivElement>(null);
-
-  // Check completion verification fallback
-  useEffect(() => {
-    try {
-      const completed = localStorage.getItem(completionKey) === "true";
-      if (!completed) {
-        setIsCompleted(false);
-      }
-    } catch {
-      /* ignore */
-    }
-  }, [completionKey]);
-
-  // 2-Second Delay Reveal for the Pricing Cards Section
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setShowPricing(true);
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, []);
 
   const triggerControlsAutoHide = () => {
     setShowControls(true);
@@ -118,7 +97,6 @@ export function NextStepScreen() {
 
   // Initialize Vimeo Player with reliable autoplay & controls
   useEffect(() => {
-    if (!isCompleted) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
 
@@ -183,33 +161,13 @@ export function NextStepScreen() {
       console.warn("Vimeo player init warning:", err);
     }
 
-    const handleFullscreenChange = () => {
-      const doc: any = document;
-      const isFull = !!(
-        doc.fullscreenElement ||
-        doc.webkitFullscreenElement ||
-        doc.mozFullScreenElement ||
-        doc.msFullscreenElement
-      );
-      setIsFullscreen(isFull);
-    };
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
-    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
-
     return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
       if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       if (playerInstance) {
         playerInstance.unload().catch(() => {});
       }
     };
-  }, [nextStepVimeoId, isCompleted]);
+  }, [nextStepVimeoId]);
 
   const togglePlay = async () => {
     handleUserActivity();
@@ -228,7 +186,6 @@ export function NextStepScreen() {
     try {
       const paused = await player.getPaused();
       if (paused) {
-        // Unmute on direct user click if currently muted
         try {
           await player.setMuted(false);
           setIsMuted(false);
@@ -292,7 +249,6 @@ export function NextStepScreen() {
       }
     }
 
-    // Direct iframe reload fallback
     if (iframeRef.current) {
       iframeRef.current.src = `https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=0&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`;
       setIsEnded(false);
@@ -314,51 +270,10 @@ export function NextStepScreen() {
     }
   };
 
-  const handleToggleFullscreen = async () => {
+  // 1-Click CSS Theater Mode Fullscreen (Blocks native OS video scrubber on iOS/Android from skipping)
+  const handleToggleFullscreen = () => {
     handleUserActivity();
-    const container = videoContainerRef.current;
-    if (!container) return;
-
-    const doc: any = document;
-    const isCurrentlyFull = !!(
-      doc.fullscreenElement ||
-      doc.webkitFullscreenElement ||
-      doc.mozFullScreenElement ||
-      doc.msFullscreenElement
-    );
-
-    try {
-      if (!isCurrentlyFull && !isFullscreen) {
-        setIsFullscreen(true);
-        if (container.requestFullscreen) {
-          await container.requestFullscreen().catch(() => {});
-        } else if ((container as any).webkitRequestFullscreen) {
-          (container as any).webkitRequestFullscreen();
-        } else if ((container as any).mozRequestFullScreen) {
-          (container as any).mozRequestFullScreen();
-        } else if ((container as any).msRequestFullscreen) {
-          (container as any).msRequestFullscreen();
-        } else if (playerRef.current) {
-          await playerRef.current.requestFullscreen().catch(() => {});
-        }
-      } else {
-        setIsFullscreen(false);
-        if (doc.exitFullscreen) {
-          await doc.exitFullscreen().catch(() => {});
-        } else if (doc.webkitExitFullscreen) {
-          doc.webkitExitFullscreen();
-        } else if (doc.mozCancelFullScreen) {
-          doc.mozCancelFullScreen();
-        } else if (doc.msExitFullscreen) {
-          doc.msExitFullscreen();
-        } else if (playerRef.current) {
-          await playerRef.current.exitFullscreen().catch(() => {});
-        }
-      }
-    } catch (err) {
-      console.warn("Fullscreen toggle fallback:", err);
-      setIsFullscreen((prev) => !prev);
-    }
+    setIsFullscreen((prev) => !prev);
   };
 
   const handleEnroll = (tier: CheckoutTier) => {
@@ -380,10 +295,6 @@ export function NextStepScreen() {
   };
 
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
-
-  if (isCompleted === null) {
-    return null;
-  }
 
   return (
     <div className="min-h-screen flex flex-col justify-between text-foreground selection:bg-[#00F076] selection:text-black bg-[#020604]">
@@ -408,46 +319,24 @@ export function NextStepScreen() {
 
       {/* Main Content Area */}
       <main className="relative z-10 mx-auto w-full max-w-5xl py-6 sm:py-8 animate-reveal">
-        {!isCompleted ? (
-          /* Gated Notice if visited directly without finishing video */
-          <div className="mx-auto max-w-md rounded-[28px] glass-card p-8 text-center my-12">
-            <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#072416] border border-[#00F076]/40 text-[#00F076] shadow-[0_0_20px_rgba(0,240,118,0.3)]">
-              <Lock className="h-6 w-6" />
+        <div className="space-y-10 sm:space-y-12">
+          {/* Top Section Header */}
+          <div className="text-center max-w-3xl mx-auto">
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#00F076]/40 bg-[#072416] px-4 py-1.5 text-xs font-bold text-[#00F076] shadow-[0_0_20px_rgba(0,240,118,0.25)] mb-3">
+              <Sparkles className="h-4 w-4" />
+              <span>Special Masterclass Briefing & Enrollment</span>
             </div>
-            <h2 className="mt-5 font-display font-extrabold italic text-2xl text-white">
-              Training Completion Required
-            </h2>
-            <p className="mt-2 text-xs text-[#A1B2A8] leading-relaxed">
-              Please complete the free training video first to unlock your masterclass enrollment.
+            <h1 className="font-display font-extrabold italic text-3xl sm:text-4xl md:text-5xl text-white tracking-tight leading-tight">
+              Unlock Your Next Step with <span className="text-[#00F076]">PenduGPT</span>
+            </h1>
+            <p className="mt-3 text-sm sm:text-base text-white/80 font-medium max-w-2xl mx-auto leading-relaxed">
+              Watch this action plan video below. Discover how to build luxury websites without
+              coding, get free domains & hosting, and close ₹25k–₹50k client deals.
             </p>
-            <button
-              onClick={() => navigate({ to: "/training" })}
-              className="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] px-7 py-3 text-xs font-display font-extrabold italic uppercase tracking-wider text-black shadow-[0_0_25px_rgba(0,240,118,0.5)] cursor-pointer"
-            >
-              <span>GO TO FREE TRAINING</span>
-              <span>→</span>
-            </button>
           </div>
-        ) : (
-          /* Unlocked Masterclass Offers & Next Step Video */
-          <div className="space-y-10 sm:space-y-12">
-            {/* Top Section Header */}
-            <div className="text-center max-w-3xl mx-auto">
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#00F076]/40 bg-[#072416] px-4 py-1.5 text-xs font-bold text-[#00F076] shadow-[0_0_20px_rgba(0,240,118,0.25)] mb-3">
-                <Sparkles className="h-4 w-4" />
-                <span>Special Masterclass Briefing & Enrollment</span>
-              </div>
-              <h1 className="font-display font-extrabold italic text-3xl sm:text-4xl md:text-5xl text-white tracking-tight leading-tight">
-                Unlock Your Next Step with <span className="text-[#00F076]">PenduGPT</span>
-              </h1>
-              <p className="mt-3 text-sm sm:text-base text-white/80 font-medium max-w-2xl mx-auto leading-relaxed">
-                Watch this action plan video below. Discover how to build luxury websites without
-                coding, get free domains & hosting, and close ₹25k–₹50k client deals.
-              </p>
-            </div>
 
-            {/* Video Preview Section (Clean, Cinema-Grade Player with Zero Clutter & Zero Vimeo Icons) */}
-            <div className="relative group/player mx-auto max-w-3xl w-full">
+          {/* Video Preview Section (Clean, Cinema-Grade Player with Zero Clutter & Zero Vimeo Icons) */}
+          <div className="relative group/player mx-auto max-w-3xl w-full">
               {/* Radiant Ambient Glow Behind Video */}
               <div className="pointer-events-none absolute -inset-2 sm:-inset-3 rounded-[32px] sm:rounded-[40px] bg-gradient-to-r from-[#00F076]/30 via-[#00D668]/20 to-[#00F076]/30 blur-2xl opacity-75 group-hover/player:opacity-100 transition-opacity duration-500" />
 
@@ -1050,7 +939,6 @@ export function NextStepScreen() {
               </div>
             </div>
           </div>
-        )}
       </main>
 
       </div>

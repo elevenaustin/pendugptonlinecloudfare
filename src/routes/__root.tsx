@@ -134,35 +134,14 @@ function RootShell({ children }: { children: ReactNode }) {
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
 
-  // Ensure fixed mobile app screen behavior & eliminate double-tap / gesture zoom
+  // Prevent pinch-zoom gestures on iOS Safari while allowing instant responsive clicks
   useEffect(() => {
-    let lastTouchEnd = 0;
-    const handleTouchEnd = (e: TouchEvent) => {
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT")
-      ) {
-        return;
-      }
-      const now = Date.now();
-      if (now - lastTouchEnd <= 350) {
-        e.preventDefault();
-      }
-      lastTouchEnd = now;
-    };
-
     const handleGestureStart = (e: Event) => {
       e.preventDefault();
     };
 
-    document.addEventListener("touchend", handleTouchEnd, { passive: false });
     document.addEventListener("gesturestart", handleGestureStart, { passive: false });
-
     return () => {
-      document.removeEventListener("touchend", handleTouchEnd);
       document.removeEventListener("gesturestart", handleGestureStart);
     };
   }, []);

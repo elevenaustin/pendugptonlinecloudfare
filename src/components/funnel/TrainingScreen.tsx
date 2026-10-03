@@ -166,7 +166,13 @@ export function TrainingScreen() {
         durationRef.current = data.duration || durationRef.current;
         lastPositionRef.current = data.seconds;
 
-        // Prevent fast-forward cheat while tracking max watched
+        // Anti-skip protection: If time jumps ahead of max watched, snap back immediately!
+        if (data.seconds > watchedRef.current + 2) {
+          player.setCurrentTime(watchedRef.current).catch(() => {});
+          return;
+        }
+
+        // Track max genuine watched seconds
         if (data.seconds > watchedRef.current) {
           watchedRef.current = data.seconds;
         }
@@ -202,27 +208,7 @@ export function TrainingScreen() {
       console.warn("Vimeo Player init warning:", err);
     }
 
-    const handleFullscreenChange = () => {
-      const doc: any = document;
-      const isFull = !!(
-        doc.fullscreenElement ||
-        doc.webkitFullscreenElement ||
-        doc.mozFullScreenElement ||
-        doc.msFullscreenElement
-      );
-      setIsFullscreen(isFull);
-    };
-
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
-    document.addEventListener("mozfullscreenchange", handleFullscreenChange);
-    document.addEventListener("MSFullscreenChange", handleFullscreenChange);
-
     return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("mozfullscreenchange", handleFullscreenChange);
-      document.removeEventListener("MSFullscreenChange", handleFullscreenChange);
       if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
       if (playerRef.current) {
         playerRef.current.unload().catch(() => {});
@@ -294,51 +280,10 @@ export function TrainingScreen() {
     }
   };
 
-  const toggleFullscreen = async () => {
+  // 1-Click CSS Theater Mode Fullscreen (Blocks native OS video scrubber on iOS/Android from skipping)
+  const toggleFullscreen = () => {
     handleUserActivity();
-    const container = videoContainerRef.current;
-    if (!container) return;
-
-    const doc: any = document;
-    const isCurrentlyFull = !!(
-      doc.fullscreenElement ||
-      doc.webkitFullscreenElement ||
-      doc.mozFullScreenElement ||
-      doc.msFullscreenElement
-    );
-
-    try {
-      if (!isCurrentlyFull && !isFullscreen) {
-        setIsFullscreen(true);
-        if (container.requestFullscreen) {
-          await container.requestFullscreen().catch(() => {});
-        } else if ((container as any).webkitRequestFullscreen) {
-          (container as any).webkitRequestFullscreen();
-        } else if ((container as any).mozRequestFullScreen) {
-          (container as any).mozRequestFullScreen();
-        } else if ((container as any).msRequestFullscreen) {
-          (container as any).msRequestFullscreen();
-        } else if (playerRef.current) {
-          await playerRef.current.requestFullscreen().catch(() => {});
-        }
-      } else {
-        setIsFullscreen(false);
-        if (doc.exitFullscreen) {
-          await doc.exitFullscreen().catch(() => {});
-        } else if (doc.webkitExitFullscreen) {
-          doc.webkitExitFullscreen();
-        } else if (doc.mozCancelFullScreen) {
-          doc.mozCancelFullScreen();
-        } else if (doc.msExitFullscreen) {
-          doc.msExitFullscreen();
-        } else if (playerRef.current) {
-          await playerRef.current.exitFullscreen().catch(() => {});
-        }
-      }
-    } catch (err) {
-      console.warn("Fullscreen toggle fallback:", err);
-      setIsFullscreen((prev) => !prev);
-    }
+    setIsFullscreen((prev) => !prev);
   };
 
   const pct = Math.round(progress * 100);
