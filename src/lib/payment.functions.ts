@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 export const paymentRecordSchema = z.object({
+  registrationId: z.string().uuid().optional().nullable(),
   paymentId: z.string().min(1, "Payment ID is required"),
   orderId: z.string().optional(),
   signature: z.string().optional(),
@@ -18,6 +19,7 @@ export const paymentRecordSchema = z.object({
 export type PaymentRecordInput = z.infer<typeof paymentRecordSchema>;
 
 export const createOrderSchema = z.object({
+  registrationId: z.string().uuid().optional().nullable(),
   amountInPaise: z.number().positive(),
   track: z.enum(["live", "recorded"]),
   trackName: z.string(),
@@ -79,6 +81,7 @@ export const createRazorpayOrder = createServerFn({ method: "POST" })
       try {
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         await supabaseAdmin.from("orders").insert({
+          registration_id: data.registrationId || null,
           selected_option: data.track,
           amount: data.amountInPaise / 100,
           currency: "INR",
@@ -87,6 +90,7 @@ export const createRazorpayOrder = createServerFn({ method: "POST" })
         });
 
         await supabaseAdmin.from("funnel_events").insert({
+          registration_id: data.registrationId || null,
           event_name: `order_initiated_${data.track}`,
         });
       } catch (dbErr) {
@@ -125,6 +129,7 @@ export const recordPayment = createServerFn({ method: "POST" })
         await supabaseAdmin
           .from("orders")
           .update({
+            registration_id: data.registrationId || undefined,
             razorpay_payment_id: data.paymentId,
             payment_status: "captured",
             updated_at: new Date().toISOString(),
@@ -132,6 +137,7 @@ export const recordPayment = createServerFn({ method: "POST" })
           .eq("razorpay_order_id", data.orderId);
       } else {
         await supabaseAdmin.from("orders").insert({
+          registration_id: data.registrationId || null,
           selected_option: data.track,
           amount: data.numericAmount,
           currency: "INR",
@@ -142,6 +148,7 @@ export const recordPayment = createServerFn({ method: "POST" })
 
       // 2. Log funnel event
       await supabaseAdmin.from("funnel_events").insert({
+        registration_id: data.registrationId || null,
         event_name: `payment_captured_${data.track}`,
       });
     } catch (err) {

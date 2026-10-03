@@ -71,14 +71,16 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
     isLaunchingRef.current = true;
     setStatus("launching");
 
-    // Fetch registered phone from phase 1 if available
+    // Fetch registered phone and registrationId from phase 1 if available
     let registeredPhone = "";
+    let storedRegistrationId: string | undefined;
     if (typeof window !== "undefined") {
       try {
         const stored = localStorage.getItem(siteConfig.video.registrationKey);
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed.whatsapp) registeredPhone = parsed.whatsapp.replace(/\D/g, "");
+          if (parsed.registrationId) storedRegistrationId = parsed.registrationId;
         }
       } catch {
         /* ignore */
@@ -89,6 +91,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
       tier,
       amount: courseConfig.price,
       phone: registeredPhone,
+      registrationId: storedRegistrationId,
     });
 
     try {
@@ -106,6 +109,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
       try {
         const orderRes = await createOrder({
           data: {
+            registrationId: storedRegistrationId,
             amountInPaise,
             track: tier,
             trackName: courseConfig.name,
@@ -255,8 +259,20 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
 
     // Store in backend database
     try {
+      let storedRegId: string | undefined;
+      try {
+        const stored = localStorage.getItem(siteConfig.video.registrationKey);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed.registrationId) storedRegId = parsed.registrationId;
+        }
+      } catch {
+        /* ignore */
+      }
+
       await savePayment({
         data: {
+          registrationId: storedRegId,
           paymentId: paymentData.paymentId,
           orderId: paymentData.orderId,
           signature: paymentData.signature,

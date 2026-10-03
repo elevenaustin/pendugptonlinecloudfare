@@ -27,27 +27,54 @@ export const submitRegistration = createServerFn({ method: "POST" })
   .validator((data: unknown) => registrationSchema.parse(data))
   .handler(async ({ data }) => {
     let registrationId: string | undefined;
+    const countryCode = data.countryCode || "+91";
+    const phone = data.whatsapp;
+
     try {
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-      // 1. Insert into public.registrations
-      const { data: regData, error } = await supabaseAdmin
+      // Check if registration already exists for this phone number to prevent duplicate clutter
+      const { data: existing } = await supabaseAdmin
         .from("registrations")
-        .insert({
-          phone_country_code: data.countryCode || "+91",
-          phone_number: data.whatsapp,
-          gender: data.gender || null,
-          device_availability: data.device || null,
-        })
         .select("id")
-        .single();
+        .eq("phone_country_code", countryCode)
+        .eq("phone_number", phone)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      if (error) {
-        console.error("Supabase registration error:", error.message);
-      } else if (regData?.id) {
-        registrationId = regData.id;
+      if (existing?.id) {
+        registrationId = existing.id;
+        // Update device or gender if provided
+        await supabaseAdmin
+          .from("registrations")
+          .update({
+            gender: data.gender || null,
+            device_availability: data.device || null,
+          })
+          .eq("id", registrationId);
+      } else {
+        // Insert new registration
+        const { data: regData, error } = await supabaseAdmin
+          .from("registrations")
+          .insert({
+            phone_country_code: countryCode,
+            phone_number: phone,
+            gender: data.gender || null,
+            device_availability: data.device || null,
+          })
+          .select("id")
+          .single();
 
-        // 2. Log funnel event
+        if (error) {
+          console.error("Supabase registration insert notice:", error.message);
+        } else if (regData?.id) {
+          registrationId = regData.id;
+        }
+      }
+
+      // Log funnel event
+      if (registrationId) {
         await supabaseAdmin.from("funnel_events").insert({
           registration_id: registrationId,
           event_name: "registration_completed",

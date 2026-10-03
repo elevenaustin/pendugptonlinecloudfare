@@ -17,13 +17,18 @@ import {
   VolumeX,
   Zap,
 } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
 import { siteConfig } from "@/config/site";
 import { track } from "@/lib/analytics";
 import { BrandLogo } from "@/components/common/BrandLogo";
 import { TrainingSkeleton } from "@/components/common/Skeleton";
+import { saveVideoProgress, fetchRemoteVideoProgress } from "@/lib/video.functions";
 
 export function TrainingScreen() {
   const navigate = useNavigate();
+  const saveRemoteProgress = useServerFn(saveVideoProgress);
+  const fetchRemoteProgress = useServerFn(fetchRemoteVideoProgress);
+
   const { vimeoId, completionThreshold, storageKey, completionKey, registrationKey } =
     siteConfig.video;
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -33,6 +38,8 @@ export function TrainingScreen() {
   const watchedRef = useRef(0);
   const lastPositionRef = useRef(0);
   const durationRef = useRef(0);
+  const lastRemoteSaveRef = useRef(0);
+  const registrationIdRef = useRef<string | null>(null);
   const milestones = useRef(new Set<number>());
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
@@ -46,6 +53,7 @@ export function TrainingScreen() {
 
   // Strict Access Control: No direct access without completing the initial registration forms!
   useEffect(() => {
+    let regId: string | null = null;
     try {
       const reg = JSON.parse(localStorage.getItem(registrationKey) || "null");
       if (!reg || !reg.registered) {
@@ -53,6 +61,8 @@ export function TrainingScreen() {
         navigate({ to: "/" });
         return;
       }
+      regId = reg.registrationId || null;
+      registrationIdRef.current = regId;
       setIsAuthorized(true);
     } catch {
       setIsAuthorized(false);
@@ -60,7 +70,7 @@ export function TrainingScreen() {
       return;
     }
 
-    // Restore saved progress and playback position
+    // Restore saved progress and playback position from localStorage
     try {
       const savedCompleted = localStorage.getItem(completionKey) === "true";
       if (savedCompleted) {
@@ -88,7 +98,32 @@ export function TrainingScreen() {
     } catch {
       /* ignore */
     }
-  }, [storageKey, completionKey, completionThreshold, registrationKey, navigate]);
+
+    // Also fetch remote progress from Supabase if registrationId is present
+    if (regId) {
+      fetchRemoteProgress({
+        data: {
+          registrationId: regId,
+          videoId: vimeoId,
+        },
+      })
+        .then((res) => {
+          if (res?.ok && res.progress) {
+            if (res.progress.isCompleted) {
+              setIsCompleted(true);
+              setProgress(1);
+            }
+            if (res.progress.lastPosition > lastPositionRef.current) {
+              lastPositionRef.current = res.progress.lastPosition;
+              if (res.progress.lastPosition > watchedRef.current) {
+                watchedRef.current = res.progress.lastPosition;
+              }
+            }
+          }
+        })
+        .catch(() => {});
+    }
+  }, [storageKey, completionKey, completionThreshold, registrationKey, navigate, vimeoId, fetchRemoteProgress]);
 
   const persist = (p: number, complete: boolean, currentSeconds?: number) => {
     try {
@@ -106,10 +141,44 @@ export function TrainingScreen() {
       if (complete) {
         localStorage.setItem(completionKey, "true");
       }
+
+      // Sync to Supabase video_progress table periodically (every 5s or on completion)
+      const regId = registrationIdRef.current;
+      if (regId && (complete || Math.abs(pos - lastRemoteSaveRef.current) >= 5)) {
+        lastRemoteSaveRef.current = pos;
+        saveRemoteProgress({
+          data: {
+            registrationId: regId,
+            videoId: vimeoId,
+            lastPositionSeconds: pos,
+            completionStatus: complete,
+          },
+        }).catch(() => {});
+      }
     } catch {
       /* ignore */
     }
   };
+
+  // Synchronize on page exit / tab switch
+  useEffect(() => {
+    const handlePageExit = () => {
+      persist(progress, isCompleted, lastPositionRef.current);
+    };
+
+    window.addEventListener("beforeunload", handlePageExit);
+    window.addEventListener("pagehide", handlePageExit);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        handlePageExit();
+      }
+    });
+
+    return () => {
+      window.removeEventListener("beforeunload", handlePageExit);
+      window.removeEventListener("pagehide", handlePageExit);
+    };
+  }, [progress, isCompleted]);
 
   const handleCompletion = () => {
     setIsCompleted(true);
