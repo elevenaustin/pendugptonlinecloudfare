@@ -17,7 +17,6 @@ import {
   CheckCircle2,
   IndianRupee,
   Search,
-  Filter,
   Download,
   RefreshCw,
   LogOut,
@@ -26,7 +25,6 @@ import {
   ShieldCheck,
   Smartphone,
   Laptop,
-  Monitor,
   Eye,
   X,
   AlertCircle,
@@ -41,11 +39,8 @@ import {
   Mail,
   Key,
   Menu,
-  KeyRound,
+  ShieldAlert,
 } from "lucide-react";
-
-const ADMIN_SECRET_KEY = "PEnduGPT2026";
-const STORAGE_KEY = "pendugpt_admin_secret_auth";
 
 export function AdminDashboard() {
   const [session, setSession] = useState<any>(null);
@@ -53,54 +48,19 @@ export function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<"overview" | "registrations" | "orders" | "settings">("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Check auth session (both Supabase Auth and Secret Key "PEnduGPT2026")
+  // Secure Supabase Auth Session Listener (Zero hardcoded keys / zero URL param auth)
   useEffect(() => {
-    // 1. Check URL query param ?key=PEnduGPT2026
-    try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const keyFromUrl = urlParams.get("key");
-      if (keyFromUrl && keyFromUrl.trim() === ADMIN_SECRET_KEY) {
-        localStorage.setItem(STORAGE_KEY, ADMIN_SECRET_KEY);
-        setSession({
-          user: { email: "master-admin@pendugpt.com", role: "SuperAdmin" },
-          isSecretKey: true,
-        });
-        setLoadingAuth(false);
-        return;
-      }
-    } catch {
-      /* ignore */
-    }
-
-    // 2. Check LocalStorage secret key
-    try {
-      const savedKey = localStorage.getItem(STORAGE_KEY);
-      if (savedKey === ADMIN_SECRET_KEY) {
-        setSession({
-          user: { email: "master-admin@pendugpt.com", role: "SuperAdmin" },
-          isSecretKey: true,
-        });
-        setLoadingAuth(false);
-        return;
-      }
-    } catch {
-      /* ignore */
-    }
-
-    // 3. Fall back to Supabase session check
+    // 1. Fetch current session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSession(session);
-      }
+      setSession(session);
       setLoadingAuth(false);
     });
 
+    // 2. Subscribe to auth state changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        setSession(session);
-      }
+      setSession(session);
       setLoadingAuth(false);
     });
 
@@ -108,11 +68,6 @@ export function AdminDashboard() {
   }, []);
 
   const handleSignOut = async () => {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
     await supabase.auth.signOut();
     setSession(null);
   };
@@ -122,17 +77,18 @@ export function AdminDashboard() {
       <div className="flex min-h-screen items-center justify-center bg-[#020604] text-emerald-400">
         <div className="flex flex-col items-center gap-4">
           <RefreshCw className="h-8 w-8 animate-spin text-emerald-500" />
-          <p className="text-sm tracking-wide text-zinc-400">Verifying secure admin credentials...</p>
+          <p className="text-sm tracking-wide text-zinc-400">Verifying secure admin session...</p>
         </div>
       </div>
     );
   }
 
-  if (!session) {
+  if (!session || !session.access_token) {
     return <AdminLoginForm onLoginSuccess={(sess) => setSession(sess)} />;
   }
 
-  const userEmail = session.user?.email || "master-admin@pendugpt.com";
+  const authToken = session.access_token;
+  const userEmail = session.user?.email || "Admin User";
 
   return (
     <div className="flex min-h-screen bg-[#020604] text-zinc-100 selection:bg-emerald-500/30 selection:text-emerald-300">
@@ -246,9 +202,7 @@ export function AdminDashboard() {
                 {userEmail}
               </p>
             </div>
-            <p className="mt-0.5 text-[10px] text-zinc-500">
-              {session.isSecretKey ? "Master Admin (Key Authenticated)" : "Authorized Admin"}
-            </p>
+            <p className="mt-0.5 text-[10px] text-zinc-500">Supabase Auth Session</p>
           </div>
 
           <button
@@ -295,9 +249,9 @@ export function AdminDashboard() {
 
         {/* Tab Body */}
         <main className="flex-1 overflow-y-auto p-4 md:p-8">
-          {activeTab === "overview" && <AdminOverviewTab onNavigate={setActiveTab} />}
-          {activeTab === "registrations" && <AdminRegistrationsTab />}
-          {activeTab === "orders" && <AdminOrdersTab />}
+          {activeTab === "overview" && <AdminOverviewTab authToken={authToken} onNavigate={setActiveTab} onSignOut={handleSignOut} />}
+          {activeTab === "registrations" && <AdminRegistrationsTab authToken={authToken} onSignOut={handleSignOut} />}
+          {activeTab === "orders" && <AdminOrdersTab authToken={authToken} onSignOut={handleSignOut} />}
           {activeTab === "settings" && <AdminSettingsTab userEmail={userEmail} onSignOut={handleSignOut} />}
         </main>
       </div>
@@ -307,41 +261,17 @@ export function AdminDashboard() {
 
 /**
  * ============================================================================
- * LOGIN SCREEN COMPONENT (Supports Secret Key "PEnduGPT2026" & Supabase Auth)
+ * LOGIN SCREEN COMPONENT (Supabase Auth Email + Password Only)
  * ============================================================================
  */
 function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => void }) {
-  const [authMode, setAuthMode] = useState<"key" | "email">("key");
-  const [secretKeyInput, setSecretKeyInput] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [showSetupHelp, setShowSetupHelp] = useState(false);
 
-  // Handle Secret Key "PEnduGPT2026" authentication
-  const handleKeyLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg(null);
-
-    const inputClean = secretKeyInput.trim();
-    if (inputClean === ADMIN_SECRET_KEY) {
-      try {
-        localStorage.setItem(STORAGE_KEY, ADMIN_SECRET_KEY);
-      } catch {
-        /* ignore */
-      }
-      onLoginSuccess({
-        user: { email: "master-admin@pendugpt.com", role: "SuperAdmin" },
-        isSecretKey: true,
-      });
-    } else {
-      setErrorMsg("Incorrect secret admin code. Please verify and try again.");
-    }
-  };
-
-  // Handle Supabase Email & Password authentication
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setLoading(true);
@@ -360,7 +290,7 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
         onLoginSuccess(data.session);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || "Invalid admin credentials. Please try again.");
+      setErrorMsg(err.message || "Invalid administrator credentials. Please check your email and password.");
     } finally {
       setLoading(false);
     }
@@ -376,46 +306,12 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
           </div>
           <h2 className="text-2xl font-bold tracking-tight text-white">PenduGPT Admin</h2>
           <p className="mt-1 text-xs text-zinc-400">
-            Private management portal. Authorized administrative access only.
+            Private management portal. Supabase authenticated administrators only.
           </p>
         </div>
 
         {/* Login Box */}
         <div className="rounded-xl border border-emerald-950/80 bg-[#040d08]/90 p-6 shadow-2xl backdrop-blur-md">
-          {/* Auth Method Tabs */}
-          <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg border border-emerald-950/80 bg-black/60 p-1">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("key");
-                setErrorMsg(null);
-              }}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
-                authMode === "key"
-                  ? "bg-emerald-500 text-black shadow"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              <KeyRound className="h-3.5 w-3.5" />
-              <span>Admin Secret Key</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("email");
-                setErrorMsg(null);
-              }}
-              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
-                authMode === "email"
-                  ? "bg-emerald-500 text-black shadow"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`}
-            >
-              <Mail className="h-3.5 w-3.5" />
-              <span>Email & Password</span>
-            </button>
-          </div>
-
           {errorMsg && (
             <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-red-900/40 bg-red-950/30 p-3 text-xs text-red-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
@@ -423,90 +319,56 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
             </div>
           )}
 
-          {/* Mode 1: Secret Key Auth */}
-          {authMode === "key" ? (
-            <form onSubmit={handleKeyLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-300">
-                  Secret Admin Passcode
-                </label>
-                <div className="relative mt-1.5">
-                  <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                  <input
-                    type="password"
-                    required
-                    autoFocus
-                    value={secretKeyInput}
-                    onChange={(e) => setSecretKeyInput(e.target.value)}
-                    placeholder="Enter Secret Code (e.g. PEnduGPT2026)"
-                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-                <p className="mt-1.5 text-[11px] text-zinc-500">
-                  Enter your master secret key to unlock instant dashboard access.
-                </p>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-zinc-300">Admin Email</label>
+              <div className="relative mt-1.5">
+                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="email"
+                  required
+                  autoFocus
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin@pendugpt.com"
+                  className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
               </div>
+            </div>
 
-              <button
-                type="submit"
-                className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400"
-              >
-                <Lock className="h-4 w-4" />
-                <span>Unlock Admin Dashboard</span>
-              </button>
-            </form>
-          ) : (
-            /* Mode 2: Supabase Email & Password Auth */
-            <form onSubmit={handleEmailLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-300">Admin Email</label>
-                <div className="relative mt-1.5">
-                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                  <input
-                    type="email"
-                    required
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="admin@pendugpt.com"
-                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-300">Password</label>
+              <div className="relative mt-1.5">
+                <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                <input
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••••••"
+                  className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                />
               </div>
+            </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-300">Password</label>
-                <div className="relative mt-1.5">
-                  <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                  <input
-                    type="password"
-                    required
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••••••"
-                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 disabled:opacity-50"
-              >
-                {loading ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                    <span>Authenticating...</span>
-                  </>
-                ) : (
-                  <>
-                    <Lock className="h-4 w-4" />
-                    <span>Access Dashboard</span>
-                  </>
-                )}
-              </button>
-            </form>
-          )}
+            <button
+              type="submit"
+              disabled={loading}
+              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  <span>Authenticating...</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="h-4 w-4" />
+                  <span>Sign In as Admin</span>
+                </>
+              )}
+            </button>
+          </form>
 
           {/* Setup Guide Accordion */}
           <div className="mt-6 border-t border-emerald-950/60 pt-4 text-center">
@@ -516,16 +378,22 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
               className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-emerald-400"
             >
               <HelpCircle className="h-3.5 w-3.5" />
-              <span>How to create or invite an admin user?</span>
+              <span>How to authorize or create an administrator?</span>
             </button>
 
             {showSetupHelp && (
               <div className="mt-3 rounded-lg border border-emerald-900/40 bg-emerald-950/30 p-3 text-left text-xs leading-relaxed text-zinc-300">
-                <p className="font-semibold text-emerald-400">Master Secret Key:</p>
-                <p className="text-zinc-300 font-mono mt-0.5">PEnduGPT2026</p>
-                <p className="mt-2 font-semibold text-emerald-400">Or via Supabase Dashboard:</p>
+                <p className="font-semibold text-emerald-400">Step 1: Open Supabase Authentication</p>
                 <p className="mt-1 text-zinc-400">
-                  Go to Supabase (<code>xlyqrzcstkxdkyvdensc</code>) → <strong>Authentication</strong> → <strong>Users</strong> → <strong>Add User</strong>.
+                  Open your Supabase project (<code>xlyqrzcstkxdkyvdensc</code>) → <strong>Authentication</strong> → <strong>Users</strong>.
+                </p>
+                <p className="mt-2 font-semibold text-emerald-400">Step 2: Create Admin Account</p>
+                <p className="mt-1 text-zinc-400">
+                  Click <strong>"Add user"</strong> → <strong>"Create user"</strong>. Enter your admin email and a strong password, then toggle <strong>"Auto Confirm User"</strong> ON.
+                </p>
+                <p className="mt-2 font-semibold text-emerald-400">Step 3: Log In</p>
+                <p className="mt-1 text-zinc-400">
+                  Return to <code>/admin</code> and sign in with your credentials.
                 </p>
               </div>
             )}
@@ -541,20 +409,35 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
  * TAB 1: OVERVIEW COMPONENT
  * ============================================================================
  */
-function AdminOverviewTab({ onNavigate }: { onNavigate: (tab: any) => void }) {
+function AdminOverviewTab({
+  authToken,
+  onNavigate,
+  onSignOut,
+}: {
+  authToken: string;
+  onNavigate: (tab: any) => void;
+  onSignOut: () => void;
+}) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const fetchOverview = async () => {
     try {
       setRefreshing(true);
-      const res = await (getAdminOverviewMetrics as any)();
+      setAuthError(null);
+      const res = await (getAdminOverviewMetrics as any)({
+        data: { authToken },
+      });
+
       if (res && res.ok) {
         setData(res.data);
+      } else {
+        setAuthError(res?.error || "Access denied. Unable to load metrics.");
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setAuthError(err.message || "Failed to load overview data.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -563,12 +446,28 @@ function AdminOverviewTab({ onNavigate }: { onNavigate: (tab: any) => void }) {
 
   useEffect(() => {
     fetchOverview();
-  }, []);
+  }, [authToken]);
 
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
         <RefreshCw className="h-6 w-6 animate-spin text-emerald-500" />
+      </div>
+    );
+  }
+
+  if (authError) {
+    return (
+      <div className="flex h-96 flex-col items-center justify-center rounded-xl border border-red-950/70 bg-[#070304] p-8 text-center">
+        <ShieldAlert className="h-12 w-12 text-red-400" />
+        <h3 className="mt-3 text-lg font-bold text-red-300">Access Denied</h3>
+        <p className="mt-1 text-xs text-zinc-400 max-w-md">{authError}</p>
+        <button
+          onClick={onSignOut}
+          className="mt-5 rounded-lg border border-red-900/40 bg-red-950/40 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-950"
+        >
+          Sign Out and Try Another Account
+        </button>
       </div>
     );
   }
@@ -590,7 +489,7 @@ function AdminOverviewTab({ onNavigate }: { onNavigate: (tab: any) => void }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-white">Live Performance Metrics</h2>
-          <p className="text-xs text-zinc-400">Aggregated real-time data from Supabase backend</p>
+          <p className="text-xs text-zinc-400">Protected real-time queries from Supabase backend</p>
         </div>
         <button
           onClick={fetchOverview}
@@ -803,7 +702,13 @@ function AdminOverviewTab({ onNavigate }: { onNavigate: (tab: any) => void }) {
  * TAB 2: REGISTRATIONS MANAGEMENT COMPONENT
  * ============================================================================
  */
-function AdminRegistrationsTab() {
+function AdminRegistrationsTab({
+  authToken,
+  onSignOut,
+}: {
+  authToken: string;
+  onSignOut: () => void;
+}) {
   const [search, setSearch] = useState("");
   const [device, setDevice] = useState<"all" | "laptop" | "desktop" | "mobile">("all");
   const [page, setPage] = useState(1);
@@ -812,12 +717,15 @@ function AdminRegistrationsTab() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [selectedRegId, setSelectedRegId] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const fetchRegistrations = async () => {
     try {
       setLoading(true);
+      setAuthError(null);
       const res = await (getAdminRegistrations as any)({
         data: {
+          authToken,
           search,
           device,
           completedOnly: "all",
@@ -829,9 +737,11 @@ function AdminRegistrationsTab() {
 
       if (res && res.ok) {
         setData(res);
+      } else {
+        setAuthError(res?.error || "Unable to fetch registrations.");
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setAuthError(err.message || "Failed to load registrations.");
     } finally {
       setLoading(false);
     }
@@ -839,12 +749,14 @@ function AdminRegistrationsTab() {
 
   useEffect(() => {
     fetchRegistrations();
-  }, [search, device, page, pageSize]);
+  }, [authToken, search, device, page, pageSize]);
 
   const handleExportCsv = async () => {
     try {
       setExporting(true);
-      const res = await (exportRegistrationsCsvData as any)();
+      const res = await (exportRegistrationsCsvData as any)({
+        data: { authToken },
+      });
       if (res && res.ok) {
         const blob = new Blob([res.csvContent], { type: "text/csv;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
@@ -861,6 +773,22 @@ function AdminRegistrationsTab() {
       setExporting(false);
     }
   };
+
+  if (authError) {
+    return (
+      <div className="flex h-96 flex-col items-center justify-center rounded-xl border border-red-950/70 bg-[#070304] p-8 text-center">
+        <ShieldAlert className="h-12 w-12 text-red-400" />
+        <h3 className="mt-3 text-lg font-bold text-red-300">Access Denied</h3>
+        <p className="mt-1 text-xs text-zinc-400 max-w-md">{authError}</p>
+        <button
+          onClick={onSignOut}
+          className="mt-5 rounded-lg border border-red-900/40 bg-red-950/40 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-950"
+        >
+          Sign Out
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -939,7 +867,7 @@ function AdminRegistrationsTab() {
               <tr>
                 <td colSpan={7} className="py-12 text-center text-zinc-500">
                   <RefreshCw className="mx-auto h-5 w-5 animate-spin text-emerald-500" />
-                  <p className="mt-2">Loading registrations...</p>
+                  <p className="mt-2">Loading registrations securely...</p>
                 </td>
               </tr>
             ) : data.items.length === 0 ? (
@@ -1067,7 +995,7 @@ function AdminRegistrationsTab() {
 
       {/* Registration Details Drawer */}
       {selectedRegId && (
-        <RegistrationDetailDrawer registrationId={selectedRegId} onClose={() => setSelectedRegId(null)} />
+        <RegistrationDetailDrawer authToken={authToken} registrationId={selectedRegId} onClose={() => setSelectedRegId(null)} />
       )}
     </div>
   );
@@ -1079,9 +1007,11 @@ function AdminRegistrationsTab() {
  * ============================================================================
  */
 function RegistrationDetailDrawer({
+  authToken,
   registrationId,
   onClose,
 }: {
+  authToken: string;
   registrationId: string;
   onClose: () => void;
 }) {
@@ -1094,7 +1024,7 @@ function RegistrationDetailDrawer({
       try {
         setLoading(true);
         const res = await (getAdminRegistrationDetail as any)({
-          data: { id: registrationId },
+          data: { authToken, id: registrationId },
         });
         if (res && res.ok) {
           setDetail(res.data);
@@ -1106,7 +1036,7 @@ function RegistrationDetailDrawer({
       }
     };
     fetchDetail();
-  }, [registrationId]);
+  }, [authToken, registrationId]);
 
   const copyId = () => {
     navigator.clipboard.writeText(registrationId);
@@ -1282,7 +1212,13 @@ function RegistrationDetailDrawer({
  * TAB 3: ORDERS & REVENUE COMPONENT
  * ============================================================================
  */
-function AdminOrdersTab() {
+function AdminOrdersTab({
+  authToken,
+  onSignOut,
+}: {
+  authToken: string;
+  onSignOut: () => void;
+}) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<"all" | "captured" | "pending" | "failed">("all");
   const [selectedOption, setSelectedOption] = useState<"all" | "live" | "recorded">("all");
@@ -1291,12 +1227,15 @@ function AdminOrdersTab() {
   const [data, setData] = useState<any>({ items: [], total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const fetchOrders = async () => {
     try {
       setLoading(true);
+      setAuthError(null);
       const res = await (getAdminOrders as any)({
         data: {
+          authToken,
           search,
           status,
           selectedOption,
@@ -1307,9 +1246,11 @@ function AdminOrdersTab() {
 
       if (res && res.ok) {
         setData(res);
+      } else {
+        setAuthError(res?.error || "Unable to fetch orders.");
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setAuthError(err.message || "Failed to load orders.");
     } finally {
       setLoading(false);
     }
@@ -1317,12 +1258,14 @@ function AdminOrdersTab() {
 
   useEffect(() => {
     fetchOrders();
-  }, [search, status, selectedOption, page, pageSize]);
+  }, [authToken, search, status, selectedOption, page, pageSize]);
 
   const handleExportOrders = async () => {
     try {
       setExporting(true);
-      const res = await (exportOrdersCsvData as any)();
+      const res = await (exportOrdersCsvData as any)({
+        data: { authToken },
+      });
       if (res && res.ok) {
         const blob = new Blob([res.csvContent], { type: "text/csv;charset=utf-8;" });
         const url = URL.createObjectURL(blob);
@@ -1339,6 +1282,22 @@ function AdminOrdersTab() {
       setExporting(false);
     }
   };
+
+  if (authError) {
+    return (
+      <div className="flex h-96 flex-col items-center justify-center rounded-xl border border-red-950/70 bg-[#070304] p-8 text-center">
+        <ShieldAlert className="h-12 w-12 text-red-400" />
+        <h3 className="mt-3 text-lg font-bold text-red-300">Access Denied</h3>
+        <p className="mt-1 text-xs text-zinc-400 max-w-md">{authError}</p>
+        <button
+          onClick={onSignOut}
+          className="mt-5 rounded-lg border border-red-900/40 bg-red-950/40 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-950"
+        >
+          Sign Out
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -1431,7 +1390,7 @@ function AdminOrdersTab() {
               <tr>
                 <td colSpan={7} className="py-12 text-center text-zinc-500">
                   <RefreshCw className="mx-auto h-5 w-5 animate-spin text-emerald-500" />
-                  <p className="mt-2">Loading orders...</p>
+                  <p className="mt-2">Loading orders securely...</p>
                 </td>
               </tr>
             ) : data.items.length === 0 ? (
@@ -1545,18 +1504,18 @@ function AdminSettingsTab({ userEmail, onSignOut }: { userEmail: string; onSignO
       {/* Account Info */}
       <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-6">
         <h3 className="text-base font-bold text-white">Active Administrator Account</h3>
-        <p className="mt-1 text-xs text-zinc-400">Current active authenticated session</p>
+        <p className="mt-1 text-xs text-zinc-400">Current active Supabase authenticated session</p>
 
         <div className="mt-4 space-y-3">
           <div className="flex items-center justify-between rounded-lg border border-emerald-900/30 bg-black/40 p-3 text-xs">
-            <span className="text-zinc-400">Logged In As:</span>
+            <span className="text-zinc-400">Authenticated Email:</span>
             <span className="font-semibold text-emerald-400">{userEmail}</span>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border border-emerald-900/30 bg-black/40 p-3 text-xs">
-            <span className="text-zinc-400">Authorization Level:</span>
+            <span className="text-zinc-400">Authorization Mechanism:</span>
             <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-300 border border-emerald-500/30">
-              Full Administrator (Master Secret Access)
+              Supabase Auth JWT Token + Server-Side Verification
             </span>
           </div>
         </div>
@@ -1572,27 +1531,33 @@ function AdminSettingsTab({ userEmail, onSignOut }: { userEmail: string; onSignO
         </div>
       </div>
 
-      {/* Secret Access Key Card */}
+      {/* Team Management */}
       <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-6">
-        <h3 className="text-base font-bold text-white">Secret Master Access Key</h3>
+        <h3 className="text-base font-bold text-white">Managing Administrator Accounts</h3>
         <p className="mt-1 text-xs text-zinc-400">
-          Fast-access pass for authorized administrators
+          How to securely add or revoke administrator accounts in Supabase
         </p>
 
-        <div className="mt-4 rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 flex items-center justify-between">
-          <div>
-            <p className="text-[11px] text-zinc-400">Secret Admin Code</p>
-            <p className="font-mono text-sm font-bold text-emerald-400">PEnduGPT2026</p>
+        <div className="mt-4 space-y-3 text-xs text-zinc-300">
+          <div className="rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 leading-relaxed">
+            <p className="font-semibold text-emerald-400">1. Adding an Administrator</p>
+            <p className="text-zinc-400">
+              In Supabase Console (<code>xlyqrzcstkxdkyvdensc</code>) &gt; <strong>Authentication</strong> &gt; <strong>Users</strong> &gt; <strong>Add User</strong>. Auto-confirm the user and assign a strong password.
+            </p>
           </div>
-          <span className="rounded bg-emerald-500/20 px-2 py-1 text-[11px] font-semibold text-emerald-300 border border-emerald-500/30">
-            Active
-          </span>
+
+          <div className="rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 leading-relaxed">
+            <p className="font-semibold text-emerald-400">2. Revoking Access</p>
+            <p className="text-zinc-400">
+              To revoke access, simply delete or ban the user in Supabase Authentication. Their JWT will be invalidated immediately on the next request.
+            </p>
+          </div>
         </div>
       </div>
 
       {/* Security Policies Audit */}
       <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-6">
-        <h3 className="text-base font-bold text-white">Database Security & RLS Status</h3>
+        <h3 className="text-base font-bold text-white">Security Architecture</h3>
         <div className="mt-3 space-y-2 text-xs text-zinc-400">
           <div className="flex items-center gap-2 text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
@@ -1600,11 +1565,11 @@ function AdminSettingsTab({ userEmail, onSignOut }: { userEmail: string; onSignO
           </div>
           <div className="flex items-center gap-2 text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
-            <span>Public visitors have ZERO direct SELECT permissions on registrations and orders.</span>
+            <span>Direct public client SELECT queries on customer data are blocked.</span>
           </div>
           <div className="flex items-center gap-2 text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
-            <span>All administrative queries execute via authenticated trusted server functions.</span>
+            <span>All dashboard data queries strictly verify Supabase Auth JWT tokens on the server.</span>
           </div>
         </div>
       </div>
