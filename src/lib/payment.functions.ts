@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import crypto from "crypto";
 
 export const paymentRecordSchema = z.object({
   registrationId: z.string().uuid().optional().nullable(),
@@ -39,9 +40,7 @@ export const createRazorpayOrder = createServerFn({ method: "POST" })
         process.env.VITE_RAZORPAY_KEY_ID ||
         siteConfig.razorpay.keyId;
       const secretKey =
-        process.env.RAZORPAY_KEY_SECRET ||
-        (siteConfig.razorpay as any).secretKey ||
-        "1ofBzwOCAqLPn7M6iQG616hx";
+        process.env.RAZORPAY_KEY_SECRET || "1ofBzwOCAqLPn7M6iQG616hx";
 
       const auth = Buffer.from(`${keyId}:${secretKey}`).toString("base64");
       const receipt = `rcpt_${data.track}_${Date.now()}`.slice(0, 40);
@@ -116,15 +115,76 @@ export const createRazorpayOrder = createServerFn({ method: "POST" })
   });
 
 /**
- * Server function to record successfully captured Razorpay payments.
+ * Server function to record and verify successfully captured Razorpay payments.
+ * Strictly verifies cryptographic HMAC-SHA256 signature and/or Razorpay API status.
  */
 export const recordPayment = createServerFn({ method: "POST" })
   .validator((data: unknown) => paymentRecordSchema.parse(data))
   .handler(async ({ data }) => {
     try {
+      const { siteConfig } = await import("@/config/site");
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-      // 1. Update or Insert into public.orders table
+      const keyId =
+        process.env.RAZORPAY_KEY_ID ||
+        process.env.VITE_RAZORPAY_KEY_ID ||
+        siteConfig.razorpay.keyId;
+      const secretKey =
+        process.env.RAZORPAY_KEY_SECRET || "1ofBzwOCAqLPn7M6iQG616hx";
+
+      // 1. Verify Payment Signature
+      let isVerified = false;
+
+      if (data.signature && data.orderId) {
+        const expectedSignature = crypto
+          .createHmac("sha256", secretKey)
+          .update(`${data.orderId}|${data.paymentId}`)
+          .digest("hex");
+
+        try {
+          isVerified = crypto.timingSafeEqual(
+            Buffer.from(expectedSignature, "utf-8"),
+            Buffer.from(data.signature, "utf-8"),
+          );
+        } catch {
+          isVerified = false;
+        }
+      }
+
+      // 2. Direct API verification fallback
+      if (!isVerified) {
+        try {
+          const auth = Buffer.from(`${keyId}:${secretKey}`).toString("base64");
+          const apiRes = await fetch(
+            `https://api.razorpay.com/v1/payments/${encodeURIComponent(data.paymentId)}`,
+            {
+              headers: { Authorization: `Basic ${auth}` },
+            },
+          );
+
+          if (apiRes.ok) {
+            const paymentDetails = (await apiRes.json()) as any;
+            if (
+              (paymentDetails.status === "captured" || paymentDetails.status === "authorized") &&
+              (data.orderId ? paymentDetails.order_id === data.orderId : true)
+            ) {
+              isVerified = true;
+            }
+          }
+        } catch (apiErr) {
+          console.warn("Direct Razorpay verification notice:", apiErr);
+        }
+      }
+
+      if (!isVerified) {
+        console.error("Payment signature verification failed for paymentId:", data.paymentId);
+        return {
+          ok: false,
+          error: "Payment verification failed. Untrusted signature or unconfirmed transaction.",
+        };
+      }
+
+      // 3. Update or Insert into public.orders table with captured status
       if (data.orderId) {
         await supabaseAdmin
           .from("orders")
@@ -146,19 +206,22 @@ export const recordPayment = createServerFn({ method: "POST" })
         });
       }
 
-      // 2. Log funnel event
+      // 4. Log verified funnel event
       await supabaseAdmin.from("funnel_events").insert({
         registration_id: data.registrationId || null,
         event_name: `payment_captured_${data.track}`,
       });
-    } catch (err) {
+
+      return {
+        ok: true,
+        recordedAt: new Date().toISOString(),
+        transactionId: data.paymentId,
+      };
+    } catch (err: any) {
       console.warn("Payment recording error:", err);
+      return {
+        ok: false,
+        error: err.message || "Failed to record payment verification",
+      };
     }
-
-    return {
-      ok: true,
-      recordedAt: new Date().toISOString(),
-      transactionId: data.paymentId,
-    };
   });
-
