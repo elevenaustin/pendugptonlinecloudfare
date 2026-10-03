@@ -91,7 +91,7 @@ export function NextStepScreen() {
           try {
             localStorage.setItem(
               siteConfig.video.registrationKey,
-              JSON.stringify({ whatsapp: "9876543210", registered: true, isTester: true }),
+              JSON.stringify({ whatsapp: "", registered: true, isTester: true }),
             );
             localStorage.setItem(siteConfig.video.completionKey, "true");
             localStorage.setItem("pendugpt_secret_bypass", "true");

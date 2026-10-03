@@ -93,16 +93,13 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
   const [countdown, setCountdown] = useState(3);
   const redirectTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Pre-fill phone and country from previous registration if available
+  // Keep phone field clean and empty for user to enter their own number
   useEffect(() => {
     if (tier && typeof window !== "undefined") {
       try {
         const stored = localStorage.getItem(siteConfig.video.registrationKey);
         if (stored) {
           const parsed = JSON.parse(stored);
-          if (parsed.whatsapp) {
-            setPhone(parsed.whatsapp.replace(/\D/g, "").slice(-10));
-          }
           if (parsed.countryCode) {
             const matched = countries.find((c) => c.code === parsed.countryCode);
             if (matched) setSelectedCountry(matched);
@@ -188,7 +185,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         console.warn("Order generation server notice:", orderErr);
       }
 
-      // 2. Razorpay Checkout Options
+      // 2. Razorpay Checkout Options displaying ALL payment methods upfront
       const options: any = {
         key: keyId,
         amount: amountPaise,
@@ -203,6 +200,26 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
         },
         theme: {
           color: isRecorded ? "#FFE600" : "#00F076",
+        },
+        // Display all payment modes (UPI, Cards, Netbanking, Wallets)
+        config: {
+          display: {
+            blocks: {
+              all_instruments: {
+                name: "All Payment Methods",
+                instruments: [
+                  { method: "upi" },
+                  { method: "card" },
+                  { method: "netbanking" },
+                  { method: "wallet" },
+                ],
+              },
+            },
+            sequence: ["block.all_instruments"],
+            preferences: {
+              show_default_blocks: true,
+            },
+          },
         },
         modal: {
           ondismiss: function () {
@@ -538,13 +555,13 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                     inputMode="numeric"
                     maxLength={selectedCountry.sampleLength ? selectedCountry.sampleLength + 2 : 12}
                     autoFocus
-                    placeholder={selectedCountry.sampleLength === 10 ? "9876543210" : "1234567890"}
+                    placeholder={selectedCountry.sampleLength === 10 ? "98765 43210" : "12345 67890"}
                     value={phone}
                     onChange={(e) => {
                       setPhone(e.target.value.replace(/\D/g, ""));
                       if (error) setError("");
                     }}
-                    className="w-full bg-transparent px-3 py-2 text-base sm:text-lg font-black font-mono text-white placeholder:text-white/20 outline-none tracking-wider"
+                    className="w-full bg-transparent px-3 py-2 text-base sm:text-lg font-black font-mono text-white placeholder:text-white/25 outline-none tracking-wider"
                   />
                 </div>
                 {error && <p className="mt-1.5 text-xs font-bold text-red-400 pl-1">{error}</p>}
