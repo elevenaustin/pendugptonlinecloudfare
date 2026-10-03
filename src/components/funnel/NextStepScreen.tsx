@@ -458,14 +458,30 @@ export function NextStepScreen() {
                 onTouchMove={handleUserActivity}
                 onClick={handleUserActivity}
                 onMouseLeave={() => isPlaying && setShowControls(false)}
-                className={`relative overflow-hidden transition-all duration-300 ${
+                className={`relative overflow-hidden transition-all duration-300 select-none touch-manipulation ${
                   isFullscreen
                     ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex items-center justify-center p-0 rounded-none"
                     : "rounded-[20px] xs:rounded-[26px] sm:rounded-[32px] glass-card p-1.5 xs:p-2.5 sm:p-4 md:p-5 border-2 border-[#00F076]/40 shadow-[0_0_60px_rgba(0,240,118,0.25)]"
                 }`}
               >
+                {/* Quick Exit Fullscreen Button on Top Right in Fullscreen Mode */}
+                {isFullscreen && (
+                  <button
+                    type="button"
+                    onClick={handleToggleFullscreen}
+                    className="absolute top-3 right-3 sm:top-5 sm:right-5 z-50 flex items-center gap-1.5 rounded-full bg-black/80 hover:bg-black text-white px-3.5 py-2 text-xs font-semibold backdrop-blur-md border border-white/25 shadow-2xl active:scale-95 cursor-pointer"
+                  >
+                    <Minimize className="h-4 w-4 text-[#00F076]" />
+                    <span>Exit Fullscreen</span>
+                  </button>
+                )}
+
                 {/* Vimeo Embed with ALL Native Controls & Sidedock COMPLETELY REMOVED */}
-                <div className="relative aspect-video w-full overflow-hidden rounded-xl sm:rounded-2xl bg-[#020503] shadow-2xl">
+                <div
+                  className={`relative aspect-video w-full overflow-hidden bg-[#020503] shadow-2xl ${
+                    isFullscreen ? "h-full max-h-screen rounded-none" : "rounded-xl sm:rounded-2xl"
+                  }`}
+                >
                   <iframe
                     ref={iframeRef}
                     src={`https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=1&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`}
@@ -497,12 +513,12 @@ export function NextStepScreen() {
 
                   {/* Custom Clean Bottom Control Bar (Hidden after 2.5s of no activity) */}
                   <div
-                    className={`absolute bottom-0 inset-x-0 z-30 p-2.5 xs:p-3 sm:p-5 bg-gradient-to-t from-black/95 via-black/60 to-transparent transition-opacity duration-300 ${
+                    className={`absolute bottom-0 inset-x-0 z-30 p-3 xs:p-4 sm:p-5 bg-gradient-to-t from-black/95 via-black/60 to-transparent transition-opacity duration-300 ${
                       showControls || !isPlaying ? "opacity-100" : "opacity-0 pointer-events-none"
                     }`}
                   >
                     {/* Glowing Progress Bar */}
-                    <div className="w-full h-1.5 sm:h-2 rounded-full bg-white/20 overflow-hidden mb-2.5 sm:mb-3 shadow-inner">
+                    <div className="w-full h-2 sm:h-2.5 rounded-full bg-white/20 overflow-hidden mb-3 shadow-inner">
                       <div
                         className="h-full rounded-full progress-water-flow shadow-[0_0_10px_rgba(0,240,118,0.8)] transition-all duration-200"
                         style={{ width: `${progressPct}%` }}
@@ -516,16 +532,16 @@ export function NextStepScreen() {
                         <button
                           type="button"
                           onClick={togglePlay}
-                          className="flex items-center gap-1 sm:gap-1.5 rounded-full bg-black/75 hover:bg-black text-white px-3 py-1.5 sm:px-3.5 sm:py-2 text-xs font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
+                          className="flex items-center gap-1.5 sm:gap-2 rounded-full bg-black/75 hover:bg-black text-white px-3.5 py-2 sm:px-4 sm:py-2 text-xs sm:text-sm font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                         >
                           {isPlaying ? (
                             <>
-                              <span className="h-3 w-3 text-[#00F076] font-bold">❚❚</span>
+                              <Pause className="h-4 w-4 text-[#00F076]" />
                               <span>Pause</span>
                             </>
                           ) : (
                             <>
-                              <Play className="h-3.5 w-3.5 text-[#00F076] fill-current" />
+                              <Play className="h-4 w-4 text-[#00F076] fill-current" />
                               <span>Play</span>
                             </>
                           )}
@@ -535,10 +551,10 @@ export function NextStepScreen() {
                         <button
                           type="button"
                           onClick={handleRewind10}
-                          className="flex items-center gap-1 rounded-full bg-black/75 hover:bg-black text-white px-2.5 py-1.5 sm:px-3 sm:py-2 text-xs font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
+                          className="flex items-center gap-1 sm:gap-1.5 rounded-full bg-black/75 hover:bg-black text-white px-3 py-2 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                           title="Rewind 10 seconds"
                         >
-                          <RotateCcw className="h-3.5 w-3.5 text-[#00F076]" />
+                          <RotateCcw className="h-4 w-4 text-[#00F076]" />
                           <span>-10s</span>
                         </button>
 
@@ -555,14 +571,14 @@ export function NextStepScreen() {
                         <button
                           type="button"
                           onClick={handleToggleMute}
-                          className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
+                          className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                           title={isMuted ? "Unmute" : "Mute"}
                           aria-label={isMuted ? "Unmute" : "Mute"}
                         >
                           {isMuted ? (
-                            <VolumeX className="h-3.5 w-3.5 text-amber-400" />
+                            <VolumeX className="h-4 w-4 text-amber-400" />
                           ) : (
-                            <Volume2 className="h-3.5 w-3.5 text-[#00F076]" />
+                            <Volume2 className="h-4 w-4 text-[#00F076]" />
                           )}
                         </button>
 
@@ -570,14 +586,14 @@ export function NextStepScreen() {
                         <button
                           type="button"
                           onClick={handleToggleFullscreen}
-                          className="grid h-8 w-8 sm:h-9 sm:w-9 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
+                          className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
                           title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                           aria-label={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
                         >
                           {isFullscreen ? (
-                            <Minimize className="h-4 w-4 text-[#00F076]" />
+                            <Minimize className="h-4.5 w-4.5 text-[#00F076]" />
                           ) : (
-                            <Maximize className="h-4 w-4 text-[#00F076]" />
+                            <Maximize className="h-4.5 w-4.5 text-[#00F076]" />
                           )}
                         </button>
                       </div>
