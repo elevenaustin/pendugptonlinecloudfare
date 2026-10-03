@@ -137,14 +137,24 @@ export function NextStepScreen() {
           const dur = await playerInstance?.getDuration();
           if (dur) setDuration(dur);
           
-          // Attempt automatic playback once user arrives
+          // Unmute and set full volume for automatic sound playback
+          try {
+            await playerInstance?.setMuted(false);
+            await playerInstance?.setVolume(1);
+            setIsMuted(false);
+          } catch {
+            /* ignore */
+          }
+
+          // Attempt automatic playback with sound
           try {
             await playerInstance?.play();
             setIsPlaying(true);
             setIsEnded(false);
+            setIsMuted(false);
             triggerControlsAutoHide();
           } catch {
-            // If browser blocks unmuted autoplay, mute and autoplay
+            // Fallback: If browser autoplay policy requires initial muted start, start muted
             try {
               await playerInstance?.setMuted(true);
               setIsMuted(true);
@@ -299,8 +309,16 @@ export function NextStepScreen() {
     if (playerRef.current) {
       try {
         const muted = await playerRef.current.getMuted();
-        await playerRef.current.setMuted(!muted);
-        setIsMuted(!muted);
+        const nextMuted = !muted;
+        await playerRef.current.setMuted(nextMuted);
+        if (!nextMuted) {
+          try {
+            await playerRef.current.setVolume(1);
+          } catch {
+            /* ignore */
+          }
+        }
+        setIsMuted(nextMuted);
       } catch {
         /* ignore */
       }
@@ -414,7 +432,7 @@ export function NextStepScreen() {
                 >
                   <iframe
                     ref={iframeRef}
-                    src={`https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=1&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`}
+                    src={`https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=0&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`}
                     className="absolute inset-0 h-full w-full border-0 pointer-events-none"
                     allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
                     title="PenduGPT Masterclass Action Plan"
@@ -426,6 +444,20 @@ export function NextStepScreen() {
                     className="absolute inset-0 h-full w-full cursor-pointer z-10 bg-transparent"
                     aria-label={isPlaying ? "Pause video" : "Play video"}
                   />
+
+                  {/* Floating Unmute Pill if mobile browser started video in muted mode */}
+                  {isPlaying && isMuted && (
+                    <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-30 animate-bounce">
+                      <button
+                        type="button"
+                        onClick={handleToggleMute}
+                        className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black px-3.5 py-1.5 text-xs font-display font-black uppercase tracking-wider shadow-[0_0_25px_rgba(0,240,118,0.9)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                      >
+                        <Volume2 className="h-3.5 w-3.5 fill-black" />
+                        <span>Tap for Sound 🔊</span>
+                      </button>
+                    </div>
+                  )}
 
                   {/* Center Big Play Button when Paused */}
                   {!isPlaying && !isEnded && (

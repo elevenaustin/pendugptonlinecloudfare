@@ -1,51 +1,63 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <!-- Background Radial Gradient -->
-    <radialGradient id="bgGrad" cx="50%" cy="30%" r="70%">
-      <stop offset="0%" stop-color="#0f1914" />
-      <stop offset="60%" stop-color="#060907" />
-      <stop offset="100%" stop-color="#020403" />
+    <!-- Deep Obsidian Black Radial Gradient -->
+    <radialGradient id="aiBg" cx="50%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#0e1f16" />
+      <stop offset="55%" stop-color="#050a07" />
+      <stop offset="100%" stop-color="#010302" />
     </radialGradient>
 
-    <!-- Neon Emerald Brand Gradient -->
-    <linearGradient id="neonGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+    <!-- Glowing Emerald AI Neon Gradient -->
+    <linearGradient id="aiGreen" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#05FFA1" />
       <stop offset="50%" stop-color="#00F076" />
       <stop offset="100%" stop-color="#00B859" />
     </linearGradient>
 
-    <!-- Glowing Accent -->
-    <filter id="emeraldGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3.5" result="blur" />
+    <!-- Neon Circuit Glow Filter -->
+    <filter id="aiGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
       <feComposite in="SourceGraphic" in2="blur" operator="over" />
     </filter>
 
     <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00F076" stop-opacity="0.8" />
-      <stop offset="50%" stop-color="#00F076" stop-opacity="0.2" />
-      <stop offset="100%" stop-color="#00F076" stop-opacity="0.6" />
+      <stop offset="0%" stop-color="#00F076" stop-opacity="0.9" />
+      <stop offset="50%" stop-color="#00F076" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#05FFA1" stop-opacity="0.75" />
     </linearGradient>
   </defs>
 
-  <!-- Black Rounded Background Container -->
-  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="3" />
+  <!-- Black High-Tech Rounded Container -->
+  <rect x="5" y="5" width="118" height="118" rx="30" fill="url(#aiBg)" stroke="url(#borderGrad)" stroke-width="2.5" />
+  <rect x="9" y="9" width="110" height="110" rx="26" fill="none" stroke="#00F076" stroke-opacity="0.12" stroke-width="1" />
 
-  <!-- Subtle Inner Ring Highlight -->
-  <rect x="8" y="8" width="112" height="112" rx="24" fill="none" stroke="#00F076" stroke-opacity="0.1" stroke-width="1" />
+  <!-- AI Neural Brain & Cybernetic Circuit Core -->
+  <g filter="url(#aiGlow)">
+    <!-- Central AI Core Hexagon/Diamond -->
+    <polygon points="64,28 92,44 92,76 64,92 36,76 36,44" fill="#04180d" stroke="url(#aiGreen)" stroke-width="4" stroke-linejoin="round" />
 
-  <!-- Stylized Geometric "P" Glyph for PenduGPT -->
-  <g filter="url(#emeraldGlow)">
-    <!-- Vertical Pillar -->
-    <rect x="32" y="28" width="18" height="72" rx="6" fill="url(#neonGreen)" />
+    <!-- AI Neural Synapse Circuit Tracks -->
+    <path d="M64 28 L64 50 M64 92 L64 70" stroke="url(#aiGreen)" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M36 44 L54 54 M92 44 L74 54" stroke="url(#aiGreen)" stroke-width="3.5" stroke-linecap="round" />
+    <path d="M36 76 L54 66 M92 76 L74 66" stroke="url(#aiGreen)" stroke-width="3.5" stroke-linecap="round" />
 
-    <!-- Top Loop of P -->
-    <path d="M42 28 H74 C88 28, 98 38, 98 52 C98 66, 88 76, 74 76 H42 Z" fill="none" stroke="url(#neonGreen)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+    <!-- Outer Neural Node Connection Dots -->
+    <circle cx="64" cy="24" r="4.5" fill="#05FFA1" />
+    <circle cx="96" cy="42" r="4.5" fill="#00F076" />
+    <circle cx="96" cy="78" r="4.5" fill="#00F076" />
+    <circle cx="64" cy="96" r="4.5" fill="#05FFA1" />
+    <circle cx="32" cy="78" r="4.5" fill="#00F076" />
+    <circle cx="32" cy="42" r="4.5" fill="#00F076" />
 
-    <!-- AI Energy Spark / Lightning Accent -->
-    <path d="M82 24 L86 36 L98 40 L86 44 L82 56 L78 44 L66 40 L78 36 Z" fill="#FFFFFF" opacity="0.95" />
-    <path d="M82 28 L84 37 L93 40 L84 43 L82 52 L80 43 L71 40 L80 37 Z" fill="#05FFA1" />
+    <!-- Central AI Neural Spark / Star / Intelligence Core -->
+    <path d="M64 42 L67 56 L81 60 L67 64 L64 78 L61 64 L47 60 L61 56 Z" fill="url(#aiGreen)" />
+    <path d="M64 48 L66 57 L75 60 L66 63 L64 72 L62 63 L53 60 L62 57 Z" fill="#FFFFFF" />
+    <circle cx="64" cy="60" r="2.5" fill="#05FFA1" />
   </g>
 
-  <!-- Small Bottom AI Node Dot -->
-  <circle cx="41" cy="88" r="4.5" fill="#FFFFFF" opacity="0.9" />
+  <!-- Micro AI Data Signals -->
+  <circle cx="50" cy="34" r="1.5" fill="#00F076" opacity="0.8" />
+  <circle cx="78" cy="34" r="1.5" fill="#00F076" opacity="0.8" />
+  <circle cx="50" cy="86" r="1.5" fill="#00F076" opacity="0.8" />
+  <circle cx="78" cy="86" r="1.5" fill="#00F076" opacity="0.8" />
 </svg>
