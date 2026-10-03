@@ -34,13 +34,16 @@ import {
   Layers,
   ArrowUpRight,
   BarChart3,
-  HelpCircle,
   Lock,
   Mail,
   Key,
   Menu,
+  KeyRound,
   ShieldAlert,
 } from "lucide-react";
+
+const ADMIN_PASSCODE = "PenduGPT2026";
+const PASSCODE_STORAGE_KEY = "pendugpt_admin_passcode_auth";
 
 export function AdminDashboard() {
   const [session, setSession] = useState<any>(null);
@@ -48,19 +51,54 @@ export function AdminDashboard() {
   const [activeTab, setActiveTab] = useState<"overview" | "registrations" | "orders" | "settings">("overview");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Secure Supabase Auth Session Listener (Zero hardcoded keys / zero URL param auth)
+  // Check auth session (supports Passcode "PenduGPT2026" & Supabase Auth)
   useEffect(() => {
-    // 1. Fetch current session
+    // 1. Check URL query param ?key=...
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlKey = urlParams.get("key");
+      if (urlKey && (urlKey.trim() === ADMIN_PASSCODE || urlKey.trim().toLowerCase() === "pendugpt2026")) {
+        localStorage.setItem(PASSCODE_STORAGE_KEY, ADMIN_PASSCODE);
+        setSession({
+          access_token: ADMIN_PASSCODE,
+          user: { email: "master-admin@pendugpt.com" },
+        });
+        setLoadingAuth(false);
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 2. Check localStorage saved passcode
+    try {
+      const savedPasscode = localStorage.getItem(PASSCODE_STORAGE_KEY);
+      if (savedPasscode && (savedPasscode === ADMIN_PASSCODE || savedPasscode.toLowerCase() === "pendugpt2026")) {
+        setSession({
+          access_token: ADMIN_PASSCODE,
+          user: { email: "master-admin@pendugpt.com" },
+        });
+        setLoadingAuth(false);
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+
+    // 3. Check Supabase Auth Session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
+      if (session) {
+        setSession(session);
+      }
       setLoadingAuth(false);
     });
 
-    // 2. Subscribe to auth state changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+      if (session) {
+        setSession(session);
+      }
       setLoadingAuth(false);
     });
 
@@ -68,6 +106,11 @@ export function AdminDashboard() {
   }, []);
 
   const handleSignOut = async () => {
+    try {
+      localStorage.removeItem(PASSCODE_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
     await supabase.auth.signOut();
     setSession(null);
   };
@@ -77,7 +120,7 @@ export function AdminDashboard() {
       <div className="flex min-h-screen items-center justify-center bg-[#020604] text-emerald-400">
         <div className="flex flex-col items-center gap-4">
           <RefreshCw className="h-8 w-8 animate-spin text-emerald-500" />
-          <p className="text-sm tracking-wide text-zinc-400">Verifying secure admin session...</p>
+          <p className="text-sm tracking-wide text-zinc-400">Verifying administrator access...</p>
         </div>
       </div>
     );
@@ -88,7 +131,7 @@ export function AdminDashboard() {
   }
 
   const authToken = session.access_token;
-  const userEmail = session.user?.email || "Admin User";
+  const userEmail = session.user?.email || "master-admin@pendugpt.com";
 
   return (
     <div className="flex min-h-screen bg-[#020604] text-zinc-100 selection:bg-emerald-500/30 selection:text-emerald-300">
@@ -202,7 +245,7 @@ export function AdminDashboard() {
                 {userEmail}
               </p>
             </div>
-            <p className="mt-0.5 text-[10px] text-zinc-500">Supabase Auth Session</p>
+            <p className="mt-0.5 text-[10px] text-zinc-500">Authenticated Admin</p>
           </div>
 
           <button
@@ -261,17 +304,44 @@ export function AdminDashboard() {
 
 /**
  * ============================================================================
- * LOGIN SCREEN COMPONENT (Supabase Auth Email + Password Only)
+ * LOGIN SCREEN COMPONENT (Clean passcode input with NO hint texts)
  * ============================================================================
  */
 function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => void }) {
+  const [authMode, setAuthMode] = useState<"passcode" | "email">("passcode");
+  const [passcodeInput, setPasscodeInput] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showSetupHelp, setShowSetupHelp] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // Handle Passcode Login
+  const handlePasscodeLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    const inputClean = passcodeInput.trim();
+    if (
+      inputClean === ADMIN_PASSCODE ||
+      inputClean === "PEnduGPT2026" ||
+      inputClean.toLowerCase() === "pendugpt2026"
+    ) {
+      try {
+        localStorage.setItem(PASSCODE_STORAGE_KEY, ADMIN_PASSCODE);
+      } catch {
+        /* ignore */
+      }
+      onLoginSuccess({
+        access_token: ADMIN_PASSCODE,
+        user: { email: "master-admin@pendugpt.com" },
+      });
+    } else {
+      setErrorMsg("Incorrect passcode. Please verify and try again.");
+    }
+  };
+
+  // Handle Supabase Email & Password Login
+  const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
     setLoading(true);
@@ -290,7 +360,7 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
         onLoginSuccess(data.session);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || "Invalid administrator credentials. Please check your email and password.");
+      setErrorMsg(err.message || "Invalid administrator credentials.");
     } finally {
       setLoading(false);
     }
@@ -306,12 +376,46 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
           </div>
           <h2 className="text-2xl font-bold tracking-tight text-white">PenduGPT Admin</h2>
           <p className="mt-1 text-xs text-zinc-400">
-            Private management portal. Supabase authenticated administrators only.
+            Private management portal. Authorized access only.
           </p>
         </div>
 
         {/* Login Box */}
         <div className="rounded-xl border border-emerald-950/80 bg-[#040d08]/90 p-6 shadow-2xl backdrop-blur-md">
+          {/* Auth Method Tabs */}
+          <div className="mb-5 grid grid-cols-2 gap-1 rounded-lg border border-emerald-950/80 bg-black/60 p-1">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("passcode");
+                setErrorMsg(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
+                authMode === "passcode"
+                  ? "bg-emerald-500 text-black shadow"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <KeyRound className="h-3.5 w-3.5" />
+              <span>Admin Key</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("email");
+                setErrorMsg(null);
+              }}
+              className={`flex items-center justify-center gap-1.5 rounded-md py-1.5 text-xs font-semibold transition ${
+                authMode === "email"
+                  ? "bg-emerald-500 text-black shadow"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <Mail className="h-3.5 w-3.5" />
+              <span>Email & Password</span>
+            </button>
+          </div>
+
           {errorMsg && (
             <div className="mb-5 flex items-start gap-2.5 rounded-lg border border-red-900/40 bg-red-950/30 p-3 text-xs text-red-300">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
@@ -319,85 +423,85 @@ function AdminLoginForm({ onLoginSuccess }: { onLoginSuccess: (session: any) => 
             </div>
           )}
 
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-medium text-zinc-300">Admin Email</label>
-              <div className="relative mt-1.5">
-                <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                <input
-                  type="email"
-                  required
-                  autoFocus
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin@pendugpt.com"
-                  className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
+          {/* Mode 1: Passcode Key Auth (Clean input, NO hints) */}
+          {authMode === "passcode" ? (
+            <form onSubmit={handlePasscodeLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">Admin Key</label>
+                <div className="relative mt-1.5">
+                  <KeyRound className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="password"
+                    required
+                    autoFocus
+                    value={passcodeInput}
+                    onChange={(e) => setPasscodeInput(e.target.value)}
+                    placeholder=""
+                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
               </div>
-            </div>
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-300">Password</label>
-              <div className="relative mt-1.5">
-                <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••••••"
-                  className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                />
+              <button
+                type="submit"
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400"
+              >
+                <Lock className="h-4 w-4" />
+                <span>Access Dashboard</span>
+              </button>
+            </form>
+          ) : (
+            /* Mode 2: Supabase Email & Password Auth */
+            <form onSubmit={handleEmailLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">Admin Email</label>
+                <div className="relative mt-1.5">
+                  <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder=""
+                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
               </div>
-            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 disabled:opacity-50"
-            >
-              {loading ? (
-                <>
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span>Authenticating...</span>
-                </>
-              ) : (
-                <>
-                  <Lock className="h-4 w-4" />
-                  <span>Sign In as Admin</span>
-                </>
-              )}
-            </button>
-          </form>
-
-          {/* Setup Guide Accordion */}
-          <div className="mt-6 border-t border-emerald-950/60 pt-4 text-center">
-            <button
-              type="button"
-              onClick={() => setShowSetupHelp(!showSetupHelp)}
-              className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-emerald-400"
-            >
-              <HelpCircle className="h-3.5 w-3.5" />
-              <span>How to authorize or create an administrator?</span>
-            </button>
-
-            {showSetupHelp && (
-              <div className="mt-3 rounded-lg border border-emerald-900/40 bg-emerald-950/30 p-3 text-left text-xs leading-relaxed text-zinc-300">
-                <p className="font-semibold text-emerald-400">Step 1: Open Supabase Authentication</p>
-                <p className="mt-1 text-zinc-400">
-                  Open your Supabase project (<code>xlyqrzcstkxdkyvdensc</code>) → <strong>Authentication</strong> → <strong>Users</strong>.
-                </p>
-                <p className="mt-2 font-semibold text-emerald-400">Step 2: Create Admin Account</p>
-                <p className="mt-1 text-zinc-400">
-                  Click <strong>"Add user"</strong> → <strong>"Create user"</strong>. Enter your admin email and a strong password, then toggle <strong>"Auto Confirm User"</strong> ON.
-                </p>
-                <p className="mt-2 font-semibold text-emerald-400">Step 3: Log In</p>
-                <p className="mt-1 text-zinc-400">
-                  Return to <code>/admin</code> and sign in with your credentials.
-                </p>
+              <div>
+                <label className="block text-xs font-medium text-zinc-300">Password</label>
+                <div className="relative mt-1.5">
+                  <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder=""
+                    className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2.5 pl-9 pr-3 text-sm text-zinc-100 placeholder-zinc-600 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                  />
+                </div>
               </div>
-            )}
-          </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-500 py-2.5 text-sm font-bold text-black shadow-lg shadow-emerald-500/20 transition-all hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {loading ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Authenticating...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-4 w-4" />
+                    <span>Access Dashboard</span>
+                  </>
+                )}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     </div>
@@ -466,7 +570,7 @@ function AdminOverviewTab({
           onClick={onSignOut}
           className="mt-5 rounded-lg border border-red-900/40 bg-red-950/40 px-4 py-2 text-xs font-semibold text-red-300 hover:bg-red-950"
         >
-          Sign Out and Try Another Account
+          Sign Out and Try Again
         </button>
       </div>
     );
@@ -489,7 +593,7 @@ function AdminOverviewTab({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-bold text-white">Live Performance Metrics</h2>
-          <p className="text-xs text-zinc-400">Protected real-time queries from Supabase backend</p>
+          <p className="text-xs text-zinc-400">Protected real-time data from database backend</p>
         </div>
         <button
           onClick={fetchOverview}
@@ -805,7 +909,7 @@ function AdminRegistrationsTab({
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search phone number or ID..."
+              placeholder=""
               className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2 pl-9 pr-3 text-xs text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
             />
           </div>
@@ -1314,7 +1418,7 @@ function AdminOrdersTab({
                 setSearch(e.target.value);
                 setPage(1);
               }}
-              placeholder="Search Payment ID or Order ID..."
+              placeholder=""
               className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2 pl-9 pr-3 text-xs text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
             />
           </div>
@@ -1504,18 +1608,18 @@ function AdminSettingsTab({ userEmail, onSignOut }: { userEmail: string; onSignO
       {/* Account Info */}
       <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-6">
         <h3 className="text-base font-bold text-white">Active Administrator Account</h3>
-        <p className="mt-1 text-xs text-zinc-400">Current active Supabase authenticated session</p>
+        <p className="mt-1 text-xs text-zinc-400">Current authenticated session</p>
 
         <div className="mt-4 space-y-3">
           <div className="flex items-center justify-between rounded-lg border border-emerald-900/30 bg-black/40 p-3 text-xs">
-            <span className="text-zinc-400">Authenticated Email:</span>
+            <span className="text-zinc-400">Account:</span>
             <span className="font-semibold text-emerald-400">{userEmail}</span>
           </div>
 
           <div className="flex items-center justify-between rounded-lg border border-emerald-900/30 bg-black/40 p-3 text-xs">
-            <span className="text-zinc-400">Authorization Mechanism:</span>
+            <span className="text-zinc-400">Access Level:</span>
             <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-300 border border-emerald-500/30">
-              Supabase Auth JWT Token + Server-Side Verification
+              Master Admin
             </span>
           </div>
         </div>
@@ -1531,45 +1635,21 @@ function AdminSettingsTab({ userEmail, onSignOut }: { userEmail: string; onSignO
         </div>
       </div>
 
-      {/* Team Management */}
-      <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-6">
-        <h3 className="text-base font-bold text-white">Managing Administrator Accounts</h3>
-        <p className="mt-1 text-xs text-zinc-400">
-          How to securely add or revoke administrator accounts in Supabase
-        </p>
-
-        <div className="mt-4 space-y-3 text-xs text-zinc-300">
-          <div className="rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 leading-relaxed">
-            <p className="font-semibold text-emerald-400">1. Adding an Administrator</p>
-            <p className="text-zinc-400">
-              In Supabase Console (<code>xlyqrzcstkxdkyvdensc</code>) &gt; <strong>Authentication</strong> &gt; <strong>Users</strong> &gt; <strong>Add User</strong>. Auto-confirm the user and assign a strong password.
-            </p>
-          </div>
-
-          <div className="rounded-lg border border-emerald-900/30 bg-black/40 p-3.5 leading-relaxed">
-            <p className="font-semibold text-emerald-400">2. Revoking Access</p>
-            <p className="text-zinc-400">
-              To revoke access, simply delete or ban the user in Supabase Authentication. Their JWT will be invalidated immediately on the next request.
-            </p>
-          </div>
-        </div>
-      </div>
-
       {/* Security Policies Audit */}
       <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-6">
-        <h3 className="text-base font-bold text-white">Security Architecture</h3>
+        <h3 className="text-base font-bold text-white">Security & Access Control</h3>
         <div className="mt-3 space-y-2 text-xs text-zinc-400">
           <div className="flex items-center gap-2 text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
-            <span>Row Level Security (RLS) is ENABLED across all 4 database tables.</span>
+            <span>Row Level Security (RLS) is active on all tables.</span>
           </div>
           <div className="flex items-center gap-2 text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
-            <span>Direct public client SELECT queries on customer data are blocked.</span>
+            <span>Direct public client queries on customer data are blocked.</span>
           </div>
           <div className="flex items-center gap-2 text-emerald-400">
             <CheckCircle2 className="h-4 w-4" />
-            <span>All dashboard data queries strictly verify Supabase Auth JWT tokens on the server.</span>
+            <span>All dashboard metrics, tables and exports are verified on the backend.</span>
           </div>
         </div>
       </div>

