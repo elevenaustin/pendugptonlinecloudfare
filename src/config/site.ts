@@ -85,7 +85,7 @@ export const siteConfig = {
   },
 
   razorpay: {
-    keyId: "rzp_live_default",
+    keyId: "rzp_live_TlZdNUBnkz3PoA",
     companyName: "PenduGPT",
     themeColor: "#00F076",
   },
