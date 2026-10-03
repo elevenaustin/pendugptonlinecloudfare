@@ -60,7 +60,7 @@ export function getRazorpayKeyId(): string {
       return import.meta.env.RAZORPAY_KEY_ID;
     }
   }
-  return siteConfig.razorpay?.keyId || "rzp_live_default";
+  return siteConfig.razorpay?.keyId || "rzp_live_TjWspxG8PkRKlr";
 }
 
 /**

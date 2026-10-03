@@ -149,6 +149,35 @@ export function NextStepScreen() {
     }
   };
 
+  // Global interaction listener: immediately unmutes audio on first user touch/click/scroll anywhere
+  useEffect(() => {
+    if (!isAuthorized) return;
+
+    const handleFirstUserInteraction = async () => {
+      if (playerRef.current) {
+        try {
+          await playerRef.current.setMuted(false);
+          await playerRef.current.setVolume(1);
+          setIsMuted(false);
+        } catch {
+          /* ignore */
+        }
+      }
+    };
+
+    window.addEventListener("pointerdown", handleFirstUserInteraction, { passive: true });
+    window.addEventListener("touchstart", handleFirstUserInteraction, { passive: true });
+    window.addEventListener("click", handleFirstUserInteraction, { passive: true });
+    window.addEventListener("keydown", handleFirstUserInteraction, { passive: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", handleFirstUserInteraction);
+      window.removeEventListener("touchstart", handleFirstUserInteraction);
+      window.removeEventListener("click", handleFirstUserInteraction);
+      window.removeEventListener("keydown", handleFirstUserInteraction);
+    };
+  }, [isAuthorized]);
+
   // Initialize Vimeo Player with reliable autoplay & controls
   useEffect(() => {
     if (!isAuthorized) return;
@@ -183,7 +212,7 @@ export function NextStepScreen() {
             setIsMuted(false);
             triggerControlsAutoHide();
           } catch {
-            // Fallback: If browser autoplay policy requires initial muted start, start muted
+            // If browser autoplay policy strictly blocks unmuted initial play without gesture, start muted and prompt
             try {
               await playerInstance?.setMuted(true);
               setIsMuted(true);
@@ -200,10 +229,17 @@ export function NextStepScreen() {
         }
       });
 
-      playerInstance.on("play", () => {
+      playerInstance.on("play", async () => {
         setIsPlaying(true);
         setIsEnded(false);
         triggerControlsAutoHide();
+        // Ensure volume is 100% on play
+        try {
+          const muted = await playerInstance?.getMuted();
+          setIsMuted(!!muted);
+        } catch {
+          /* ignore */
+        }
       });
 
       playerInstance.on("pause", () => {
@@ -252,12 +288,19 @@ export function NextStepScreen() {
       const paused = await player.getPaused();
       if (paused) {
         try {
+          await player.setMuted(false);
+          await player.setVolume(1);
+          setIsMuted(false);
+        } catch {
+          /* ignore */
+        }
+        try {
           await player.play();
           setIsPlaying(true);
           setIsEnded(false);
           triggerControlsAutoHide();
         } catch {
-          // If browser blocks unmuted play, mute and play
+          // If browser strictly blocks unmuted play, mute and play
           try {
             await player.setMuted(true);
             setIsMuted(true);
@@ -480,9 +523,9 @@ export function NextStepScreen() {
                       <button
                         type="button"
                         onClick={handleToggleMute}
-                        className="flex items-center gap-1.5 rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black px-3.5 py-1.5 text-xs font-display font-black uppercase tracking-wider shadow-[0_0_25px_rgba(0,240,118,0.9)] hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                        className="flex items-center gap-2 rounded-full bg-gradient-to-r from-[#00F076] via-[#3bf995] to-[#00D668] text-black px-4 py-2 text-xs sm:text-sm font-display font-black uppercase tracking-wider shadow-[0_0_30px_rgba(0,240,118,1)] hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/60"
                       >
-                        <Volume2 className="h-3.5 w-3.5 fill-black" />
+                        <Volume2 className="h-4 w-4 fill-black stroke-black" />
                         <span>Tap for Sound 🔊</span>
                       </button>
                     </div>

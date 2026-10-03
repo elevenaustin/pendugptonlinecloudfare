@@ -27,7 +27,7 @@ import {
   createWhatsAppRedirectUrl,
   type PaymentDetails,
 } from "@/lib/razorpay";
-import { recordPayment } from "@/lib/payment.functions";
+import { recordPayment, createRazorpayOrder } from "@/lib/payment.functions";
 import { track } from "@/lib/analytics";
 
 export type CheckoutTier = "live" | "recorded";
@@ -79,6 +79,7 @@ interface RazorpayCheckoutDialogProps {
 
 export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialogProps) {
   const savePayment = useServerFn(recordPayment);
+  const createOrder = useServerFn(createRazorpayOrder);
 
   const [phone, setPhone] = useState("");
   const [selectedCountry, setSelectedCountry] = useState<Country>(countries[0]);
@@ -169,14 +170,33 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
       const amountPaise = courseConfig.amountInPaise || 249900;
       const orderRef = `PENDU-${Date.now()}`;
 
-      // Razorpay Checkout Options
-      const options = {
+      // 1. Create official Razorpay Order ID via backend API
+      let serverOrderId: string | undefined;
+      try {
+        const orderRes = await createOrder({
+          data: {
+            amountInPaise,
+            track: tier || "recorded",
+            trackName: courseConfig.name,
+            phone: fullInternationalPhone,
+          },
+        });
+        if (orderRes?.ok && orderRes.orderId) {
+          serverOrderId = orderRes.orderId;
+        }
+      } catch (orderErr) {
+        console.warn("Order generation server notice:", orderErr);
+      }
+
+      // 2. Razorpay Checkout Options
+      const options: any = {
         key: keyId,
         amount: amountPaise,
         currency: "INR",
         name: "PenduGPT",
         description: `${courseConfig.name} — Lifetime Access`,
         image: siteConfig.logo,
+        order_id: serverOrderId,
         prefill: {
           contact: `${selectedCountry.code.replace("+", "")}${cleanPhone}`,
           name: "PenduGPT Learner",
@@ -193,7 +213,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
           if (response.razorpay_payment_id) {
             await handlePaymentSuccess({
               paymentId: response.razorpay_payment_id,
-              orderId: response.razorpay_order_id || orderRef,
+              orderId: response.razorpay_order_id || serverOrderId || orderRef,
               signature: response.razorpay_signature,
               fullPhone: fullInternationalPhone,
             });
