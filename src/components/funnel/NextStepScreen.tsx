@@ -42,7 +42,6 @@ import { RazorpayCheckoutDialog, type CheckoutTier } from "@/components/funnel/R
 import { LiveEnrollmentToast } from "@/components/funnel/LiveEnrollmentToast";
 import { StudentReviewsMarquee } from "@/components/funnel/StudentReviewsMarquee";
 import { BrandLogo } from "@/components/common/BrandLogo";
-import { TopHeadBanner } from "@/components/common/TopHeadBanner";
 import { SiteFooter } from "@/components/common/SiteFooter";
 import { track } from "@/lib/analytics";
 
@@ -313,9 +312,6 @@ export function NextStepScreen() {
 
   return (
     <div className="min-h-screen flex flex-col justify-between text-foreground selection:bg-[#00F076] selection:text-black bg-[#020604]">
-      {/* Urgency Top Head Banner */}
-      <TopHeadBanner />
-
       {/* Dynamic Purchase Popups matching exact screenshot reference (Shield Icon, No Photo) */}
       <LiveEnrollmentToast />
 

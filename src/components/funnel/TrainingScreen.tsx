@@ -20,8 +20,6 @@ import {
 import { siteConfig } from "@/config/site";
 import { track } from "@/lib/analytics";
 import { BrandLogo } from "@/components/common/BrandLogo";
-import { TopHeadBanner } from "@/components/common/TopHeadBanner";
-import { SiteFooter } from "@/components/common/SiteFooter";
 
 export function TrainingScreen() {
   const navigate = useNavigate();
@@ -300,9 +298,6 @@ export function TrainingScreen() {
 
   return (
     <div className="relative min-h-screen flex flex-col justify-between text-foreground selection:bg-[#00F076] selection:text-black">
-      {/* Urgency Top Head Banner */}
-      <TopHeadBanner />
-
       {/* SaaS Floating Navbar Header */}
       <header className="relative z-20 w-full pt-4 px-4">
         <nav className="mx-auto flex max-w-5xl items-center justify-between rounded-2xl glass-panel px-4 sm:px-6 py-2.5">
@@ -592,8 +587,10 @@ export function TrainingScreen() {
         </div>
       </main>
 
-      {/* Complete Footer matching Image 2 */}
-      <SiteFooter />
+      {/* Minimal Footer */}
+      <footer className="relative z-10 w-full border-t border-white/10 py-6 px-4 mt-8 text-center text-xs text-white/50">
+        <p>© {new Date().getFullYear()} PenduGPT. All rights reserved.</p>
+      </footer>
     </div>
   );
 }

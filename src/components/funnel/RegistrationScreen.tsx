@@ -18,8 +18,6 @@ import { siteConfig } from "@/config/site";
 import { registrationSchema, submitRegistration } from "@/lib/leads.functions";
 import { track } from "@/lib/analytics";
 import { BrandLogo } from "@/components/common/BrandLogo";
-import { TopHeadBanner } from "@/components/common/TopHeadBanner";
-import { SiteFooter } from "@/components/common/SiteFooter";
 
 interface Country {
   name: string;
@@ -175,9 +173,6 @@ export function RegistrationScreen() {
 
   return (
     <div className="relative min-h-screen flex flex-col justify-between text-foreground selection:bg-[#00F076] selection:text-black">
-      {/* Urgency Top Head Banner */}
-      <TopHeadBanner />
-
       <div className="w-full flex-1 flex flex-col justify-between px-4 py-6 sm:py-10">
         {/* Top Header Logo */}
         <header className="relative z-10 mx-auto w-full max-w-lg text-center pt-2 pb-4">
@@ -556,8 +551,10 @@ export function RegistrationScreen() {
         </div>
       )}
 
-      {/* Complete Footer matching Image 2 */}
-      <SiteFooter />
+      {/* Minimal Footer */}
+      <footer className="relative z-10 mx-auto text-center text-xs text-white/40 py-4">
+        <p>© {new Date().getFullYear()} PenduGPT. All rights reserved.</p>
+      </footer>
     </div>
   );
 }
