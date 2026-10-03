@@ -5,9 +5,9 @@
 export const siteConfig = {
   brand: "PenduGPT",
   logo: "/pendugpt-logo.jpg",
-  title: "PenduGPT — Build Stunning Websites with AI",
+  title: "PenduGPT™ — AI Website Masterclass | No-Code Web Dev",
   description:
-    "Learn to design, build, and launch modern websites using AI tools — even without traditional coding experience.",
+    "Learn to design, build, and sell modern high-ticket websites using AI tools with PenduGPT.",
 
   video: {
     /**

@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Background Radial Gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#0f1914" />
+      <stop offset="60%" stop-color="#060907" />
+      <stop offset="100%" stop-color="#020403" />
+    </radialGradient>
+
+    <!-- Neon Emerald Brand Gradient -->
+    <linearGradient id="neonGreen" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#05FFA1" />
+      <stop offset="50%" stop-color="#00F076" />
+      <stop offset="100%" stop-color="#00B859" />
+    </linearGradient>
+
+    <!-- Glowing Accent -->
+    <filter id="emeraldGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3.5" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F076" stop-opacity="0.8" />
+      <stop offset="50%" stop-color="#00F076" stop-opacity="0.2" />
+      <stop offset="100%" stop-color="#00F076" stop-opacity="0.6" />
+    </linearGradient>
+  </defs>
+
+  <!-- Black Rounded Background Container -->
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="3" />
+
+  <!-- Subtle Inner Ring Highlight -->
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="none" stroke="#00F076" stroke-opacity="0.1" stroke-width="1" />
+
+  <!-- Stylized Geometric "P" Glyph for PenduGPT -->
+  <g filter="url(#emeraldGlow)">
+    <!-- Vertical Pillar -->
+    <rect x="32" y="28" width="18" height="72" rx="6" fill="url(#neonGreen)" />
+
+    <!-- Top Loop of P -->
+    <path d="M42 28 H74 C88 28, 98 38, 98 52 C98 66, 88 76, 74 76 H42 Z" fill="none" stroke="url(#neonGreen)" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+
+    <!-- AI Energy Spark / Lightning Accent -->
+    <path d="M82 24 L86 36 L98 40 L86 44 L82 56 L78 44 L66 40 L78 36 Z" fill="#FFFFFF" opacity="0.95" />
+    <path d="M82 28 L84 37 L93 40 L84 43 L82 52 L80 43 L71 40 L80 37 Z" fill="#05FFA1" />
+  </g>
+
+  <!-- Small Bottom AI Node Dot -->
+  <circle cx="41" cy="88" r="4.5" fill="#FFFFFF" opacity="0.9" />
+</svg>

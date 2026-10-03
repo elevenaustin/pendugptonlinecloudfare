@@ -18,8 +18,10 @@ import {
   Laptop,
   Lock,
   Maximize,
+  Minimize,
   MessageSquare,
   Network,
+  Pause,
   Play,
   PlayCircle,
   Radio,
@@ -52,6 +54,7 @@ export function NextStepScreen() {
   const { recorded, live } = siteConfig.courses;
   const nextStepVimeoId = siteConfig.nextStepVideo?.vimeoId || "1232620094";
 
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const playerRef = useRef<Player | null>(null);
@@ -70,11 +73,34 @@ export function NextStepScreen() {
 
   const pricingSectionRef = useRef<HTMLDivElement>(null);
 
-  // Pre-fetch Razorpay script in background for instant payment modal opening on low-end networks
+  // Strict Funnel Guard: Verify visitor completed Step 1 (Registration) AND Step 2 (Training Video)
   useEffect(() => {
-    setIsMounted(true);
-    loadRazorpayScript().catch(() => {});
-  }, []);
+    try {
+      // 1. Check if user completed registration
+      const reg = JSON.parse(localStorage.getItem(siteConfig.video.registrationKey) || "null");
+      if (!reg || !reg.registered) {
+        setIsAuthorized(false);
+        navigate({ to: "/" });
+        return;
+      }
+
+      // 2. Check if user completed masterclass training video
+      const isCompleted = localStorage.getItem(siteConfig.video.completionKey) === "true";
+      if (!isCompleted) {
+        setIsAuthorized(false);
+        navigate({ to: "/training" });
+        return;
+      }
+
+      setIsAuthorized(true);
+      setIsMounted(true);
+      // Pre-fetch Razorpay script in background for instant modal popup
+      loadRazorpayScript().catch(() => {});
+    } catch {
+      setIsAuthorized(false);
+      navigate({ to: "/" });
+    }
+  }, [navigate]);
 
   const triggerControlsAutoHide = () => {
     setShowControls(true);
@@ -96,6 +122,7 @@ export function NextStepScreen() {
 
   // Initialize Vimeo Player with reliable autoplay & controls
   useEffect(() => {
+    if (!isAuthorized) return;
     const iframe = iframeRef.current;
     if (!iframe) return;
 
@@ -166,7 +193,7 @@ export function NextStepScreen() {
         playerInstance.unload().catch(() => {});
       }
     };
-  }, [nextStepVimeoId]);
+  }, [nextStepVimeoId, isAuthorized]);
 
   const togglePlay = async () => {
     handleUserActivity();
@@ -295,7 +322,7 @@ export function NextStepScreen() {
 
   const progressPct = duration > 0 ? Math.min(100, Math.max(0, (currentTime / duration) * 100)) : 0;
 
-  if (!isMounted) {
+  if (!isMounted || !isAuthorized) {
     return <NextStepSkeleton />;
   }
 
