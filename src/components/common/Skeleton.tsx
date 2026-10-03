@@ -145,9 +145,9 @@ export function NextStepSkeleton() {
           </div>
         </div>
 
-        {/* Two Parallel Pricing Cards Skeleton */}
-        <div className="grid grid-cols-2 gap-2 xs:gap-3 sm:gap-6 max-w-4xl mx-auto">
-          <div className="rounded-[24px] sm:rounded-[32px] glass-card p-3 sm:p-7 space-y-3">
+        {/* Two Pricing Cards Skeleton */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 sm:gap-6 max-w-4xl mx-auto">
+          <div className="rounded-[24px] sm:rounded-[32px] glass-card p-5 sm:p-7 space-y-3">
             <Skeleton className="h-4 w-20 rounded-md" />
             <Skeleton className="h-6 sm:h-8 w-3/4 rounded-lg" />
             <Skeleton className="h-8 sm:h-12 w-1/2 rounded-xl" />
@@ -155,7 +155,7 @@ export function NextStepSkeleton() {
             <Skeleton className="h-10 sm:h-12 w-full rounded-2xl mt-4" />
           </div>
 
-          <div className="rounded-[24px] sm:rounded-[32px] glass-card p-3 sm:p-7 space-y-3">
+          <div className="rounded-[24px] sm:rounded-[32px] glass-card p-5 sm:p-7 space-y-3">
             <Skeleton className="h-4 w-20 rounded-md" />
             <Skeleton className="h-6 sm:h-8 w-3/4 rounded-lg" />
             <Skeleton className="h-8 sm:h-12 w-1/2 rounded-xl" />

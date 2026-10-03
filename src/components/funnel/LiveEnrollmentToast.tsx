@@ -148,35 +148,35 @@ export function LiveEnrollmentToast() {
   return (
     <aside
       aria-label="Recent verified purchase notification"
-      className="fixed bottom-4 left-4 z-50 max-w-[370px] sm:max-w-[420px] rounded-[24px] sm:rounded-[28px] border border-[#d4f934]/35 bg-[#050b06]/98 p-4 sm:p-4.5 backdrop-blur-2xl shadow-[0_15px_45px_rgba(0,0,0,0.9),0_0_30px_rgba(212,249,52,0.18)] animate-toast-slide-up transition-all duration-300"
+      className="fixed top-3 left-3 right-3 sm:top-auto sm:bottom-5 sm:left-5 sm:right-auto z-50 sm:max-w-[390px] rounded-[18px] sm:rounded-[24px] border border-[#00F076]/35 bg-[#050b06]/95 p-2.5 sm:p-4 backdrop-blur-2xl shadow-[0_10px_35px_rgba(0,0,0,0.85),0_0_20px_rgba(0,240,118,0.15)] animate-toast-slide-up transition-all duration-300 pointer-events-auto"
     >
-      <div className="flex items-center gap-3.5">
+      <div className="flex items-center gap-2.5 sm:gap-3.5">
         {/* Glowing Green Verified Shield Icon (No Profile Picture) */}
-        <div className="relative grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#0d2818] border-2 border-[#d4f934]/70 text-[#d4f934] shadow-[0_0_25px_rgba(212,249,52,0.45),inset_0_0_12px_rgba(212,249,52,0.2)]">
-          <ShieldCheck className="h-6 w-6 stroke-[2.2]" />
-          <span className="absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full bg-[#d4f934] ring-2 ring-[#050b06] animate-green-dot" />
+        <div className="relative grid h-9 w-9 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-full bg-[#0d2818] border border-[#00F076]/70 text-[#00F076] shadow-[0_0_15px_rgba(0,240,118,0.35)]">
+          <ShieldCheck className="h-4.5 w-4.5 sm:h-5.5 sm:w-5.5 stroke-[2.2]" />
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 sm:h-2.5 sm:w-2.5 rounded-full bg-[#00F076] ring-1 ring-[#050b06] animate-green-dot" />
         </div>
 
         {/* Content Info */}
-        <div className="flex-1 min-w-0 pr-1">
+        <div className="flex-1 min-w-0 pr-0.5">
           {/* Header Line: Name and Location */}
           <div className="flex items-center justify-between">
-            <h4 className="font-display font-extrabold text-[13px] sm:text-sm text-white tracking-tight truncate">
+            <h4 className="font-display font-extrabold text-[11.5px] sm:text-sm text-white tracking-tight truncate">
               {current.name} from {current.city}
             </h4>
           </div>
 
           {/* Middle Line: Price Paid and Access Status */}
-          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap text-xs">
+          <div className="mt-0.5 flex items-center gap-1.5 flex-wrap text-[10.5px] sm:text-xs">
             <span className="font-extrabold text-white">₹{current.price} Paid</span>
-            <span className="text-white/40 text-[10px]">•</span>
-            <span className="font-extrabold text-[#d4f934] tracking-tight">
+            <span className="text-white/40 text-[9px]">•</span>
+            <span className="font-extrabold text-[#00F076] tracking-tight truncate">
               {current.accessBadge} ✓
             </span>
           </div>
 
           {/* Subline: Details and Time Ago */}
-          <p className="mt-1 text-[11px] text-white/55 font-medium truncate">
+          <p className="mt-0.5 text-[9px] sm:text-[10.5px] text-white/60 font-medium truncate">
             {current.subDetails} • {current.timeAgo}
           </p>
         </div>
@@ -184,18 +184,18 @@ export function LiveEnrollmentToast() {
         {/* Close Button */}
         <button
           onClick={() => setIsDismissed(true)}
-          className="self-start text-white/40 hover:text-white transition-colors p-1 -mr-1 -mt-1 rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
+          className="self-center sm:self-start text-white/40 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/10 cursor-pointer shrink-0"
           aria-label="Close notification"
         >
-          <X className="h-4 w-4" />
+          <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
         </button>
       </div>
 
       {/* Subtle Progress Bar */}
-      <div className="mt-3 h-[2px] w-full overflow-hidden rounded-full bg-white/10">
+      <div className="mt-2 sm:mt-2.5 h-[1.5px] sm:h-[2px] w-full overflow-hidden rounded-full bg-white/10">
         <div
           key={currentIndex}
-          className="h-full bg-gradient-to-r from-[#00F076] to-[#d4f934] transition-all duration-[6000ms] ease-linear"
+          className="h-full bg-gradient-to-r from-[#00F076] to-[#00d668] transition-all duration-[6000ms] ease-linear"
           style={{ width: "100%", animation: "none" }}
         />
       </div>

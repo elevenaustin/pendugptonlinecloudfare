@@ -241,14 +241,31 @@ export function TrainingScreen() {
     try {
       const paused = await playerRef.current.getPaused();
       if (paused) {
-        await playerRef.current.play();
-        setIsPlaying(true);
-        triggerControlsAutoHide();
+        try {
+          await playerRef.current.play();
+          setIsPlaying(true);
+          triggerControlsAutoHide();
+        } catch {
+          // If browser blocks unmuted play on mobile, mute and play
+          try {
+            await playerRef.current.setMuted(true);
+            setIsMuted(true);
+            await playerRef.current.play();
+            setIsPlaying(true);
+            triggerControlsAutoHide();
+          } catch {
+            /* ignore */
+          }
+        }
       } else {
-        await playerRef.current.pause();
-        setIsPlaying(false);
-        setShowControls(true);
-        if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+        try {
+          await playerRef.current.pause();
+          setIsPlaying(false);
+          setShowControls(true);
+          if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
+        } catch {
+          /* ignore */
+        }
       }
     } catch {
       /* fallback */

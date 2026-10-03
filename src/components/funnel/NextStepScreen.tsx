@@ -213,20 +213,32 @@ export function NextStepScreen() {
       const paused = await player.getPaused();
       if (paused) {
         try {
-          await player.setMuted(false);
-          setIsMuted(false);
+          await player.play();
+          setIsPlaying(true);
+          setIsEnded(false);
+          triggerControlsAutoHide();
+        } catch {
+          // If browser blocks unmuted play, mute and play
+          try {
+            await player.setMuted(true);
+            setIsMuted(true);
+            await player.play();
+            setIsPlaying(true);
+            setIsEnded(false);
+            triggerControlsAutoHide();
+          } catch {
+            /* ignore */
+          }
+        }
+      } else {
+        try {
+          await player.pause();
+          setIsPlaying(false);
+          setShowControls(true);
+          if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
         } catch {
           /* ignore */
         }
-        await player.play();
-        setIsPlaying(true);
-        setIsEnded(false);
-        triggerControlsAutoHide();
-      } else {
-        await player.pause();
-        setIsPlaying(false);
-        setShowControls(true);
-        if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       }
     } catch {
       /* fallback */
@@ -260,26 +272,25 @@ export function NextStepScreen() {
       try {
         await player.setCurrentTime(0);
         try {
-          await player.setMuted(false);
-          setIsMuted(false);
+          await player.play();
+          setIsPlaying(true);
+          setIsEnded(false);
+          triggerControlsAutoHide();
         } catch {
-          /* ignore */
+          try {
+            await player.setMuted(true);
+            setIsMuted(true);
+            await player.play();
+            setIsPlaying(true);
+            setIsEnded(false);
+            triggerControlsAutoHide();
+          } catch {
+            /* ignore */
+          }
         }
-        await player.play();
-        setIsEnded(false);
-        setIsPlaying(true);
-        triggerControlsAutoHide();
-        return;
       } catch {
-        /* fallback to iframe reload */
+        /* ignore */
       }
-    }
-
-    if (iframeRef.current) {
-      iframeRef.current.src = `https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=0&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`;
-      setIsEnded(false);
-      setIsPlaying(true);
-      triggerControlsAutoHide();
     }
   };
 
@@ -578,16 +589,16 @@ export function NextStepScreen() {
                 </p>
               </div>
 
-              {/* The Two Attractive Pricing Cards: Option 1 (Live) & Option 2 (Recorded) - Strictly Visible Parallel on Mobile & Desktop */}
-              <div className="grid grid-cols-2 gap-2 xs:gap-3 sm:gap-6 md:gap-8 max-w-4xl mx-auto items-stretch font-sans">
+              {/* The Two Attractive Pricing Cards: Option 1 (Live) & Option 2 (Recorded) - Responsive Mobile-First Stack & Desktop Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-6 md:gap-8 max-w-4xl mx-auto items-stretch font-sans">
                 {/* ================= OPTION 1: LIVE MASTERCLASS (FEATURED WITH INTENSE GLOW) ================= */}
-                <div className="relative flex flex-col justify-between rounded-[22px] sm:rounded-[32px] md:rounded-[36px] border-2 border-[#00F076] bg-gradient-to-b from-[#092e1b] via-[#05170e] to-[#020805] p-2.5 xs:p-3.5 sm:p-7 md:p-8 shadow-[0_0_55px_-5px_rgba(0,240,118,0.5)] animate-glow-pulse transition-all">
-                  {/* Glowing ambient halo behind badge matching screenshot */}
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-36 sm:w-64 h-16 sm:h-20 bg-[#00F076]/30 blur-xl rounded-full pointer-events-none" />
+                <div className="relative flex flex-col justify-between rounded-[24px] sm:rounded-[32px] md:rounded-[36px] border-2 border-[#00F076] bg-gradient-to-b from-[#092e1b] via-[#05170e] to-[#020805] p-5 sm:p-7 md:p-8 shadow-[0_0_45px_-5px_rgba(0,240,118,0.45)] transition-all">
+                  {/* Glowing ambient halo behind badge */}
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-48 sm:w-64 h-14 sm:h-20 bg-[#00F076]/25 blur-xl rounded-full pointer-events-none" />
 
-                  {/* Clean Single-Line Top Glowing Ribbon Badge as Screenshot */}
-                  <div className="absolute -top-3 sm:-top-3.5 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap flex items-center gap-1 sm:gap-1.5 rounded-full bg-[#00F076] px-2 xs:px-3 sm:px-4 py-0.5 sm:py-1 text-[7.5px] xs:text-[9px] sm:text-[11px] font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(0,240,118,0.95)] ring-1 ring-white/40">
-                    <span className="h-1.5 w-1.5 sm:h-2 sm:w-2 rounded-full bg-red-600 animate-live-dot shrink-0" />
+                  {/* Clean Top Ribbon Badge */}
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap flex items-center gap-1.5 rounded-full bg-[#00F076] px-3.5 sm:px-4 py-1 text-[9.5px] sm:text-[11px] font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(0,240,118,0.95)] ring-1 ring-white/40">
+                    <span className="h-2 w-2 rounded-full bg-red-600 animate-live-dot shrink-0" />
                     <span>🔥 LIVE BATCH • 3 SEATS LEFT</span>
                   </div>
 
@@ -595,53 +606,53 @@ export function NextStepScreen() {
                     {/* Header Info */}
                     <div className="flex items-center justify-between mt-1 sm:mt-2">
                       <div>
-                        <span className="text-[8px] xs:text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#00F076]">
+                        <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#00F076]">
                           OPTION 1
                         </span>
-                        <h3 className="font-display font-extrabold italic text-xs xs:text-sm sm:text-xl md:text-2xl text-white mt-0.5 leading-tight">
+                        <h3 className="font-display font-extrabold italic text-lg sm:text-2xl text-white mt-0.5 leading-tight">
                           Live Masterclass
                         </h3>
                       </div>
-                      <span className="rounded-md sm:rounded-xl border border-red-500/40 bg-red-950/60 px-1 xs:px-1.5 sm:px-2.5 py-0.5 text-[7px] xs:text-[8.5px] sm:text-[10px] font-extrabold uppercase tracking-wider text-red-400 shrink-0">
+                      <span className="rounded-lg sm:rounded-xl border border-red-500/40 bg-red-950/60 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-red-400 shrink-0">
                         {live.discount}
                       </span>
                     </div>
 
                     {/* Price with Original Crossed Price & /one-time tag */}
-                    <div className="mt-2.5 sm:mt-5 flex items-baseline gap-1 xs:gap-1.5 sm:gap-2.5 flex-wrap">
-                      <span className="font-display font-extrabold italic text-xl xs:text-2xl sm:text-4xl md:text-5xl text-white tracking-tight drop-shadow-[0_0_15px_rgba(0,240,118,0.4)]">
+                    <div className="mt-3 sm:mt-5 flex items-baseline gap-2 sm:gap-2.5 flex-wrap">
+                      <span className="font-display font-extrabold italic text-3xl sm:text-4xl md:text-5xl text-white tracking-tight drop-shadow-[0_0_15px_rgba(0,240,118,0.4)]">
                         {live.price}
                       </span>
-                      <span className="text-[8.5px] xs:text-[10.5px] sm:text-sm line-through text-white/40 font-medium">
+                      <span className="text-xs sm:text-sm line-through text-white/40 font-medium">
                         {live.originalPrice}
                       </span>
-                      <span className="text-[7.5px] xs:text-[9px] sm:text-xs font-bold text-[#00F076] bg-[#00F076]/15 px-1.5 py-0.5 rounded border border-[#00F076]/30">
+                      <span className="text-[10px] sm:text-xs font-bold text-[#00F076] bg-[#00F076]/15 px-2 py-0.5 rounded border border-[#00F076]/30">
                         /one-time
                       </span>
                     </div>
 
-                    <p className="mt-1 text-[8px] xs:text-[9.5px] sm:text-[11px] font-bold text-[#00F076]">
-                      One-Time Fee • Lifetime Access
+                    <p className="mt-1 text-xs font-bold text-[#00F076]">
+                      {live.priceNote}
                     </p>
 
-                    <p className="mt-2 sm:mt-3.5 text-[8.5px] xs:text-[10px] sm:text-xs md:text-sm text-white/80 leading-snug sm:leading-relaxed border-t border-white/10 pt-2 sm:pt-3">
+                    <p className="mt-2.5 sm:mt-3 text-xs sm:text-sm text-white/80 leading-relaxed border-t border-white/10 pt-2.5 sm:pt-3">
                       {live.desc}
                     </p>
 
                     {/* Verified Inclusions Header */}
-                    <div className="mt-3.5 sm:mt-6 flex items-center gap-1 sm:gap-1.5 text-[8px] xs:text-[9.5px] sm:text-[11px] font-black uppercase tracking-wider text-[#00F076]">
-                      <ShieldCheck className="h-2.5 w-2.5 xs:h-3.5 xs:w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                      <span>✨ VERIFIED LIVE INCLUSIONS:</span>
+                    <div className="mt-4 sm:mt-6 flex items-center gap-1.5 text-[10px] sm:text-xs font-black uppercase tracking-wider text-[#00F076]">
+                      <ShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                      <span>✨ LIVE INCLUSIONS:</span>
                     </div>
 
-                    {/* Rich Live Feature Highlights with Glowing Circular Ticks */}
-                    <div className="mt-2 sm:mt-3.5 space-y-1.5 xs:space-y-2 sm:space-y-3">
+                    {/* Feature Highlights */}
+                    <div className="mt-2.5 sm:mt-3.5 space-y-2 sm:space-y-3">
                       {live.features.map((feat, idx) => (
-                        <div key={idx} className="flex items-start gap-1 xs:gap-1.5 sm:gap-3">
-                          <div className="h-3 w-3 xs:h-3.5 xs:w-3.5 sm:h-5 sm:w-5 rounded-full bg-[#072416] border border-[#00F076] flex items-center justify-center shrink-0 text-[#00F076] shadow-[0_0_8px_rgba(0,240,118,0.5)] mt-0.5">
-                            <Check className="h-2 w-2 sm:h-3 sm:w-3 stroke-[3]" />
+                        <div key={idx} className="flex items-start gap-2 sm:gap-3">
+                          <div className="h-4 w-4 sm:h-5 sm:w-5 rounded-full bg-[#072416] border border-[#00F076] flex items-center justify-center shrink-0 text-[#00F076] shadow-[0_0_8px_rgba(0,240,118,0.4)] mt-0.5">
+                            <Check className="h-2.5 w-2.5 sm:h-3 sm:w-3 stroke-[3]" />
                           </div>
-                          <span className="text-[8px] xs:text-[9.5px] sm:text-xs md:text-sm text-white font-medium leading-tight sm:leading-snug">
+                          <span className="text-xs sm:text-sm text-white font-medium leading-snug">
                             {feat}
                           </span>
                         </div>
@@ -649,30 +660,30 @@ export function NextStepScreen() {
                     </div>
                   </div>
 
-                  {/* Clean Short-Text High-Impact CTA Button */}
-                  <div className="mt-4 sm:mt-8 pt-2.5 sm:pt-4 border-t border-white/10">
+                  {/* CTA Button */}
+                  <div className="mt-6 sm:mt-8 pt-3 sm:pt-4 border-t border-white/10">
                     <button
                       onClick={() => handleEnroll("live")}
-                      className="group relative flex w-full items-center justify-center gap-1 sm:gap-2 rounded-xl sm:rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-2 xs:py-2.5 sm:py-4 px-1 xs:px-2.5 sm:px-6 text-[9.5px] xs:text-[11px] sm:text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(0,240,118,0.75)] transition-all duration-200 hover:shadow-[0_0_40px_rgba(0,240,118,0.95)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      className="group relative flex w-full items-center justify-center gap-2 rounded-xl sm:rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-3 sm:py-4 px-4 sm:px-6 text-xs sm:text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(0,240,118,0.75)] transition-all duration-200 hover:shadow-[0_0_40px_rgba(0,240,118,0.95)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                     >
-                      <Zap className="h-3 w-3 sm:h-4 sm:w-4 fill-black text-black shrink-0 hidden xs:inline-block" />
+                      <Zap className="h-4 w-4 fill-black text-black shrink-0" />
                       <span>Join Live — {live.price}</span>
-                      <ArrowRight className="h-2.5 w-2.5 sm:h-4 sm:w-4 transition-transform group-hover:translate-x-1 shrink-0" />
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1 shrink-0" />
                     </button>
-                    <p className="mt-1 sm:mt-2 text-center text-[7.5px] xs:text-[8.5px] sm:text-[11px] text-[#00F076] font-semibold">
-                      🔒 1-on-1 Mentorship + VIP WhatsApp Group
+                    <p className="mt-1.5 sm:mt-2 text-center text-[10px] sm:text-xs text-[#00F076] font-semibold">
+                      🔒 1-on-1 Mentorship + VIP WhatsApp Community
                     </p>
                   </div>
                 </div>
 
                 {/* ================= OPTION 2: RECORDED SESSIONS (SHARP RADIANT YELLOW THEME) ================= */}
-                <div className="relative flex flex-col justify-between rounded-[22px] sm:rounded-[32px] md:rounded-[36px] border-2 border-[#FFE600] bg-gradient-to-b from-[#221c05] via-[#120f02] to-[#050401] p-2.5 xs:p-3.5 sm:p-7 md:p-8 shadow-[0_0_55px_-5px_rgba(255,230,0,0.35)] transition-all">
-                  {/* Glowing sharp yellow ambient halo behind badge matching screenshot */}
-                  <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-36 sm:w-64 h-16 sm:h-20 bg-[#FFE600]/25 blur-xl rounded-full pointer-events-none" />
+                <div className="relative flex flex-col justify-between rounded-[24px] sm:rounded-[32px] md:rounded-[36px] border-2 border-[#FFE600] bg-gradient-to-b from-[#221c05] via-[#120f02] to-[#050401] p-5 sm:p-7 md:p-8 shadow-[0_0_45px_-5px_rgba(255,230,0,0.35)] transition-all">
+                  {/* Glowing halo behind badge */}
+                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-48 sm:w-64 h-14 sm:h-20 bg-[#FFE600]/25 blur-xl rounded-full pointer-events-none" />
 
-                  {/* Clean Single-Line Recommended Ribbon Badge as Screenshot */}
-                  <div className="absolute -top-3 sm:-top-3.5 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap flex items-center gap-1 sm:gap-1.5 rounded-full bg-[#FFE600] px-2 xs:px-3 sm:px-4 py-0.5 sm:py-1 text-[7.5px] xs:text-[9px] sm:text-[11px] font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(255,230,0,0.95)] ring-1 ring-white/50">
-                    <span className="text-[9px] sm:text-xs font-black text-black">✦</span>
+                  {/* Clean Top Ribbon Badge */}
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap flex items-center gap-1.5 rounded-full bg-[#FFE600] px-3.5 sm:px-4 py-1 text-[9.5px] sm:text-[11px] font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(255,230,0,0.95)] ring-1 ring-white/50">
+                    <span className="text-[10px] sm:text-xs font-black text-black">✦</span>
                     <span className="text-black">⭐ RECOMMENDED • SELF-PACED</span>
                   </div>
 
@@ -680,53 +691,53 @@ export function NextStepScreen() {
                     {/* Header Info */}
                     <div className="flex items-center justify-between mt-1 sm:mt-2">
                       <div>
-                        <span className="text-[8px] xs:text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#FFE600]">
+                        <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#FFE600]">
                           OPTION 2
                         </span>
-                        <h3 className="font-display font-extrabold italic text-xs xs:text-sm sm:text-xl md:text-2xl text-white mt-0.5 leading-tight">
+                        <h3 className="font-display font-extrabold italic text-lg sm:text-2xl text-white mt-0.5 leading-tight">
                           Recorded Sessions
                         </h3>
                       </div>
-                      <span className="rounded-md sm:rounded-xl border border-[#FFE600]/50 bg-[#FFE600]/15 px-1 xs:px-1.5 sm:px-2.5 py-0.5 text-[7px] xs:text-[8.5px] sm:text-[10px] font-black uppercase tracking-wider text-[#FFE600] shrink-0">
+                      <span className="rounded-lg sm:rounded-xl border border-[#FFE600]/50 bg-[#FFE600]/15 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#FFE600] shrink-0">
                         {recorded.discount}
                       </span>
                     </div>
 
                     {/* Price with Original Crossed Price & /one-time tag */}
-                    <div className="mt-2.5 sm:mt-5 flex items-baseline gap-1 xs:gap-1.5 sm:gap-2.5 flex-wrap">
-                      <span className="font-display font-extrabold italic text-xl xs:text-2xl sm:text-4xl md:text-5xl text-white tracking-tight drop-shadow-[0_0_15px_rgba(255,230,0,0.35)]">
+                    <div className="mt-3 sm:mt-5 flex items-baseline gap-2 sm:gap-2.5 flex-wrap">
+                      <span className="font-display font-extrabold italic text-3xl sm:text-4xl md:text-5xl text-white tracking-tight drop-shadow-[0_0_15px_rgba(255,230,0,0.35)]">
                         {recorded.price}
                       </span>
-                      <span className="text-[8.5px] xs:text-[10.5px] sm:text-sm line-through text-white/40 font-medium">
+                      <span className="text-xs sm:text-sm line-through text-white/40 font-medium">
                         {recorded.originalPrice}
                       </span>
-                      <span className="text-[7.5px] xs:text-[9px] sm:text-xs font-bold text-[#FFE600] bg-[#FFE600]/15 px-1.5 py-0.5 rounded border border-[#FFE600]/30">
+                      <span className="text-[10px] sm:text-xs font-bold text-[#FFE600] bg-[#FFE600]/15 px-2 py-0.5 rounded border border-[#FFE600]/30">
                         /one-time
                       </span>
                     </div>
 
-                    <p className="mt-1 text-[8px] xs:text-[9.5px] sm:text-[11px] font-bold text-[#FFE600]">
-                      One-Time Fee • Instant Lifetime Access
+                    <p className="mt-1 text-xs font-bold text-[#FFE600]">
+                      {recorded.priceNote}
                     </p>
 
-                    <p className="mt-2 sm:mt-3.5 text-[8.5px] xs:text-[10px] sm:text-xs md:text-sm text-white/80 leading-snug sm:leading-relaxed border-t border-white/10 pt-2 sm:pt-3">
+                    <p className="mt-2.5 sm:mt-3 text-xs sm:text-sm text-white/80 leading-relaxed border-t border-white/10 pt-2.5 sm:pt-3">
                       {recorded.desc}
                     </p>
 
                     {/* Verified Inclusions Header */}
-                    <div className="mt-3.5 sm:mt-6 flex items-center gap-1 sm:gap-1.5 text-[8px] xs:text-[9.5px] sm:text-[11px] font-black uppercase tracking-wider text-[#FFE600]">
-                      <CheckCircle2 className="h-2.5 w-2.5 xs:h-3.5 xs:w-3.5 sm:h-4 sm:w-4 shrink-0 text-[#FFE600]" />
-                      <span>✨ VERIFIED RECORDED INCLUSIONS:</span>
+                    <div className="mt-4 sm:mt-6 flex items-center gap-1.5 text-[10px] sm:text-xs font-black uppercase tracking-wider text-[#FFE600]">
+                      <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-[#FFE600]" />
+                      <span>✨ RECORDED INCLUSIONS:</span>
                     </div>
 
-                    {/* Unique Recorded Features with Verified Sharp Yellow Ticks */}
-                    <div className="mt-2 sm:mt-3.5 space-y-1.5 xs:space-y-2 sm:space-y-3">
+                    {/* Feature Highlights */}
+                    <div className="mt-2.5 sm:mt-3.5 space-y-2 sm:space-y-3">
                       {recorded.features.map((feat, idx) => (
-                        <div key={idx} className="flex items-start gap-1 xs:gap-1.5 sm:gap-3">
-                          <div className="h-3 w-3 xs:h-3.5 xs:w-3.5 sm:h-5 sm:w-5 rounded-full bg-[#1c1602] border border-[#FFE600] flex items-center justify-center shrink-0 text-[#FFE600] mt-0.5 shadow-[0_0_8px_rgba(255,230,0,0.5)]">
-                            <Check className="h-2 w-2 sm:h-3 sm:w-3 stroke-[3]" />
+                        <div key={idx} className="flex items-start gap-2 sm:gap-3">
+                          <div className="h-4 w-4 sm:h-5 sm:w-5 rounded-full bg-[#1c1602] border border-[#FFE600] flex items-center justify-center shrink-0 text-[#FFE600] mt-0.5 shadow-[0_0_8px_rgba(255,230,0,0.4)]">
+                            <Check className="h-2.5 w-2.5 sm:h-3 sm:w-3 stroke-[3]" />
                           </div>
-                          <span className="text-[8px] xs:text-[9.5px] sm:text-xs md:text-sm text-white font-medium leading-tight sm:leading-snug">
+                          <span className="text-xs sm:text-sm text-white font-medium leading-snug">
                             {feat}
                           </span>
                         </div>
@@ -734,18 +745,18 @@ export function NextStepScreen() {
                     </div>
                   </div>
 
-                  {/* Clean Short-Text High-Impact Sharp Yellow CTA Button */}
-                  <div className="mt-4 sm:mt-8 pt-2.5 sm:pt-4 border-t border-white/10">
+                  {/* CTA Button */}
+                  <div className="mt-6 sm:mt-8 pt-3 sm:pt-4 border-t border-white/10">
                     <button
                       onClick={() => handleEnroll("recorded")}
-                      className="group relative flex w-full items-center justify-center gap-1 sm:gap-2 rounded-xl sm:rounded-2xl bg-gradient-to-r from-[#FFE600] via-[#FFD600] to-[#E5A800] py-2 xs:py-2.5 sm:py-4 px-1 xs:px-2.5 sm:px-6 text-[9.5px] xs:text-[11px] sm:text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(255,230,0,0.75)] transition-all duration-200 hover:shadow-[0_0_40px_rgba(255,230,0,0.95)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      className="group relative flex w-full items-center justify-center gap-2 rounded-xl sm:rounded-2xl bg-gradient-to-r from-[#FFE600] via-[#FFD600] to-[#E5A800] py-3 sm:py-4 px-4 sm:px-6 text-xs sm:text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(255,230,0,0.75)] transition-all duration-200 hover:shadow-[0_0_40px_rgba(255,230,0,0.95)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                     >
-                      <Rocket className="h-3 w-3 sm:h-4 sm:w-4 fill-black text-black shrink-0 hidden xs:inline-block" />
+                      <Rocket className="h-4 w-4 fill-black text-black shrink-0" />
                       <span>Get Recorded — {recorded.price}</span>
-                      <ArrowRight className="h-2.5 w-2.5 sm:h-4 sm:w-4 transition-transform group-hover:translate-x-1 shrink-0" />
+                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1 shrink-0" />
                     </button>
-                    <p className="mt-1 sm:mt-2 text-center text-[7.5px] xs:text-[8.5px] sm:text-[11px] text-[#FFE600] font-semibold">
-                      ⚡ Instant Access to All Class Content & 100+ Prompt Vault
+                    <p className="mt-1.5 sm:mt-2 text-center text-[10px] sm:text-xs text-[#FFE600] font-semibold">
+                      ⚡ Instant Access to All Modules + 100+ Prompts
                     </p>
                   </div>
                 </div>
