@@ -72,50 +72,103 @@ export async function handleRazorpayWebhook(request: Request): Promise<Response>
   try {
     // Event: payment.captured or order.paid
     if (eventName === "payment.captured" || eventName === "order.paid") {
-      const orderId = paymentEntity?.order_id || orderEntity?.id;
+      const orderId = paymentEntity?.order_id || orderEntity?.id || null;
       const paymentId = paymentEntity?.id;
-      const amount = paymentEntity?.amount ? paymentEntity.amount / 100 : undefined;
+      const amount = paymentEntity?.amount ? paymentEntity.amount / 100 : 2499;
+      const contact = paymentEntity?.contact ? paymentEntity.contact.replace(/\D/g, "") : "";
+      const desc = (paymentEntity?.description || "").toLowerCase();
 
-      if (orderId) {
-        // Idempotency check: Check if order is already marked as captured
-        const { data: existingOrder } = await supabaseAdmin
-          .from("orders")
-          .select("id, payment_status, razorpay_payment_id")
-          .eq("razorpay_order_id", orderId)
+      let track: "live" | "recorded" = "recorded";
+      if (amount > 3000 || desc.includes("live") || desc.includes("option 1")) {
+        track = "live";
+      }
+
+      // Check if registration exists by phone
+      let regId: string | null = null;
+      if (contact.length >= 6) {
+        const { data: matchedReg } = await supabaseAdmin
+          .from("registrations")
+          .select("id")
+          .ilike("phone_number", `%${contact.slice(-10)}%`)
+          .order("created_at", { ascending: false })
+          .limit(1)
           .maybeSingle();
 
-        if (existingOrder?.payment_status === "captured" && existingOrder?.razorpay_payment_id === paymentId) {
-          // Already processed - return 200 OK
-          return new Response(JSON.stringify({ received: true, idempotent: true }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+        if (matchedReg?.id) {
+          regId = matchedReg.id;
         }
+      }
+
+      // Check if order already recorded by paymentId
+      const { data: existingPayment } = await supabaseAdmin
+        .from("orders")
+        .select("id, payment_status")
+        .eq("razorpay_payment_id", paymentId)
+        .maybeSingle();
+
+      if (existingPayment?.id) {
+        // Idempotency: already marked as captured
+        return new Response(JSON.stringify({ received: true, idempotent: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Check if pending order by order_id exists
+      let updated = false;
+      if (orderId) {
+        const { data: existingOrder } = await supabaseAdmin
+          .from("orders")
+          .select("id")
+          .eq("razorpay_order_id", orderId)
+          .maybeSingle();
 
         if (existingOrder?.id) {
           await supabaseAdmin
             .from("orders")
             .update({
+              registration_id: regId || undefined,
               razorpay_payment_id: paymentId,
               payment_status: "captured",
               updated_at: new Date().toISOString(),
             })
-            .eq("razorpay_order_id", orderId);
-        } else {
-          // Insert order if missing
-          await supabaseAdmin.from("orders").insert({
-            selected_option: paymentEntity?.notes?.course || "live",
-            amount: amount || 2499,
-            currency: "INR",
-            razorpay_order_id: orderId,
-            razorpay_payment_id: paymentId,
-            payment_status: "captured",
-          });
+            .eq("id", existingOrder.id);
+          updated = true;
+        }
+      }
+
+      // If not updated from pending, insert new captured order
+      if (!updated) {
+        await supabaseAdmin.from("orders").insert({
+          registration_id: regId,
+          selected_option: track,
+          amount: amount,
+          currency: paymentEntity?.currency || "INR",
+          razorpay_order_id: orderId,
+          razorpay_payment_id: paymentId,
+          payment_status: "captured",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+
+      // Update lead status & log event
+      if (regId) {
+        try {
+          await supabaseAdmin
+            .from("registrations")
+            .update({
+              lead_status: "converted",
+              is_read: true,
+            })
+            .eq("id", regId);
+        } catch {
+          /* column fallback */
         }
 
-        // Log funnel event
         await supabaseAdmin.from("funnel_events").insert({
-          event_name: `webhook_payment_captured_${paymentEntity?.notes?.course || "unknown"}`,
+          registration_id: regId,
+          event_name: `payment_captured_${track}`,
         });
       }
     }

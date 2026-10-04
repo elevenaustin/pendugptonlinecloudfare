@@ -7,6 +7,7 @@ import {
   getAdminRegistrationDetail,
   updateAdminLeadStatus,
   batchUpdateAdminLeads,
+  syncRazorpayPayments,
   exportRegistrationsCsvData,
   exportOrdersCsvData,
 } from "@/lib/admin.functions";
@@ -44,16 +45,12 @@ import {
   ShieldAlert,
   MessageSquare,
   Phone,
-  Filter,
   SlidersHorizontal,
   CheckSquare,
   Square,
   UserCheck,
   FileText,
   Send,
-  Calendar,
-  Tag,
-  Globe,
   ChevronDown,
 } from "lucide-react";
 
@@ -536,16 +533,29 @@ function AdminOverviewTab({
   authToken: string;
   onNavigate: (tab: any) => void;
   onSignOut: () => void;
-  }) {
+}) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncingRzp, setSyncingRzp] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const fetchOverview = async () => {
+  const fetchOverview = async (triggerSync = false) => {
     try {
       setRefreshing(true);
       setAuthError(null);
+
+      if (triggerSync) {
+        setSyncingRzp(true);
+        try {
+          await (syncRazorpayPayments as any)({ data: { authToken } });
+        } catch {
+          /* ignore */
+        } finally {
+          setSyncingRzp(false);
+        }
+      }
+
       const res = await (getAdminOverviewMetrics as any)({
         data: { authToken },
       });
@@ -564,7 +574,7 @@ function AdminOverviewTab({
   };
 
   useEffect(() => {
-    fetchOverview();
+    fetchOverview(true);
   }, [authToken]);
 
   if (loading) {
@@ -607,19 +617,31 @@ function AdminOverviewTab({
   return (
     <div className="space-y-6">
       {/* Top action row */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-white">Live Performance & CRM Metrics</h2>
-          <p className="text-xs text-zinc-400">Protected real-time data synced from database</p>
+          <p className="text-xs text-zinc-400">Protected real-time data synced with Razorpay & Database</p>
         </div>
-        <button
-          onClick={fetchOverview}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 rounded-lg border border-emerald-900/50 bg-emerald-950/30 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-900/60 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          <span>Refresh</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => fetchOverview(true)}
+            disabled={syncingRzp || refreshing}
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/20 disabled:opacity-50"
+            title="Reconcile and sync payments directly from Razorpay"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncingRzp ? "animate-spin" : ""}`} />
+            <span>{syncingRzp ? "Syncing Razorpay..." : "Sync Live Payments"}</span>
+          </button>
+
+          <button
+            onClick={() => fetchOverview(false)}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-900/50 bg-emerald-950/30 px-3 py-1.5 text-xs font-semibold text-emerald-400 transition hover:bg-emerald-900/60 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
 
       {/* KPI Cards Grid */}
@@ -836,7 +858,7 @@ function AdminOverviewTab({
 
 /**
  * ============================================================================
- * LEAD STATUS BADGE COMPONENT
+ * LEAD STATUS BADGE CONFIG
  * ============================================================================
  */
 const LEAD_STATUS_CONFIG: Record<
@@ -934,7 +956,6 @@ function AdminRegistrationsTab({
   });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
   // Fetch leads with active filters
@@ -943,7 +964,6 @@ function AdminRegistrationsTab({
       if (!isSilent) setLoading(true);
       setAuthError(null);
 
-      // Determine effective filters combining quickTab and specific dropdowns
       let effectiveReadStatus = readStatus;
       let effectiveLeadStatus = leadStatus;
       let effectiveFunnelStage = funnelStage;
@@ -1019,7 +1039,6 @@ function AdminRegistrationsTab({
     if (e) e.stopPropagation();
     const newReadState = !row.isRead;
 
-    // Optimistic UI update
     setData((prev: any) => ({
       ...prev,
       items: prev.items.map((item: any) =>
@@ -1032,7 +1051,6 @@ function AdminRegistrationsTab({
     }));
 
     try {
-      setUpdatingId(row.id);
       await (updateAdminLeadStatus as any)({
         data: {
           authToken,
@@ -1043,14 +1061,11 @@ function AdminRegistrationsTab({
     } catch (err) {
       console.error("Failed to update read state:", err);
       fetchRegistrations(true);
-    } finally {
-      setUpdatingId(null);
     }
   };
 
   // Handle Lead Status Change
   const handleStatusChange = async (registrationId: string, newStatus: string) => {
-    // Optimistic update
     setData((prev: any) => ({
       ...prev,
       items: prev.items.map((item: any) =>
@@ -1059,7 +1074,6 @@ function AdminRegistrationsTab({
     }));
 
     try {
-      setUpdatingId(registrationId);
       await (updateAdminLeadStatus as any)({
         data: {
           authToken,
@@ -1071,8 +1085,6 @@ function AdminRegistrationsTab({
     } catch (err) {
       console.error("Failed to update lead status:", err);
       fetchRegistrations(true);
-    } finally {
-      setUpdatingId(null);
     }
   };
 
@@ -1119,7 +1131,6 @@ function AdminRegistrationsTab({
     }
   };
 
-  // Select all on current page
   const handleSelectAll = () => {
     if (selectedLeadIds.length === data.items.length) {
       setSelectedLeadIds([]);
@@ -1158,7 +1169,6 @@ function AdminRegistrationsTab({
     }
   };
 
-  // Reset All Filters
   const handleResetFilters = () => {
     setSearch("");
     setQuickTab("all");
@@ -2337,13 +2347,26 @@ function AdminOrdersTab({
   const [pageSize, setPageSize] = useState(15);
   const [data, setData] = useState<any>({ items: [], total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
+  const [syncingRzp, setSyncingRzp] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (triggerSync = false) => {
     try {
       setLoading(true);
       setAuthError(null);
+
+      if (triggerSync) {
+        setSyncingRzp(true);
+        try {
+          await (syncRazorpayPayments as any)({ data: { authToken } });
+        } catch {
+          /* ignore */
+        } finally {
+          setSyncingRzp(false);
+        }
+      }
+
       const res = await (getAdminOrders as any)({
         data: {
           authToken,
@@ -2368,7 +2391,7 @@ function AdminOrdersTab({
   };
 
   useEffect(() => {
-    fetchOrders();
+    fetchOrders(true);
   }, [authToken, search, status, selectedOption, page, pageSize]);
 
   const handleExportOrders = async () => {
@@ -2463,7 +2486,17 @@ function AdminOrdersTab({
         {/* Actions */}
         <div className="flex items-center gap-2">
           <button
-            onClick={fetchOrders}
+            onClick={() => fetchOrders(true)}
+            disabled={syncingRzp || loading}
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-50"
+            title="Sync all live payments from Razorpay"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncingRzp ? "animate-spin" : ""}`} />
+            <span>{syncingRzp ? "Syncing..." : "Sync Razorpay"}</span>
+          </button>
+
+          <button
+            onClick={() => fetchOrders(false)}
             disabled={loading}
             className="flex items-center gap-1.5 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-3 py-2 text-xs font-medium text-emerald-400 hover:bg-emerald-900/50"
           >
@@ -2487,7 +2520,7 @@ function AdminOrdersTab({
         <table className="w-full text-left text-xs">
           <thead className="border-b border-emerald-950/80 bg-black/40 text-zinc-400">
             <tr>
-              <th className="px-4 py-3 font-semibold">Customer / Reg ID</th>
+              <th className="px-4 py-3 font-semibold">Customer / Phone</th>
               <th className="px-4 py-3 font-semibold">Track</th>
               <th className="px-4 py-3 font-semibold">Amount</th>
               <th className="px-4 py-3 font-semibold">Razorpay Order ID</th>
@@ -2509,7 +2542,7 @@ function AdminOrdersTab({
                 <td colSpan={7} className="py-12 text-center text-zinc-500">
                   <CreditCard className="mx-auto h-8 w-8 text-zinc-600" />
                   <p className="mt-2 text-sm font-medium text-zinc-400">No matching orders found</p>
-                  <p className="text-xs text-zinc-600">Orders will appear here as visitors start checkout.</p>
+                  <p className="text-xs text-zinc-600">Click &quot;Sync Razorpay&quot; to fetch live transactions.</p>
                 </td>
               </tr>
             ) : (
