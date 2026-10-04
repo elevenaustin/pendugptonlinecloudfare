@@ -77,6 +77,109 @@ export const authHeaderSchema = z.object({
 });
 
 /**
+ * Helper to parse lead CRM data (Status, Read flag, Notes timeline, Last Contacted)
+ * from both registration record columns and funnel_events timeline.
+ */
+export function parseLeadCRM(r: any) {
+  const events = (r.funnel_events || []).sort(
+    (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  );
+
+  // 1. Read / Unread flag
+  let isRead = false;
+  if (r.is_read !== undefined && r.is_read !== null) {
+    isRead = Boolean(r.is_read);
+  } else {
+    const readEvent = events.find((e: any) => e.event_name?.startsWith("admin_read:"));
+    if (readEvent) {
+      isRead = readEvent.event_name === "admin_read:true";
+    }
+  }
+
+  // 2. Lead status
+  let leadStatus = "new";
+  if (r.lead_status && typeof r.lead_status === "string" && r.lead_status.trim()) {
+    leadStatus = r.lead_status.trim();
+  } else {
+    const statusEvent = events.find((e: any) => e.event_name?.startsWith("admin_status:"));
+    if (statusEvent) {
+      leadStatus = statusEvent.event_name.replace("admin_status:", "").trim() || "new";
+    }
+  }
+
+  // 3. Notes & Notes Timeline
+  const notesTimeline: Array<{ id: string; note: string; createdAt: string }> = [];
+  events.forEach((e: any) => {
+    if (e.event_name?.startsWith("admin_note:")) {
+      try {
+        const rawNote = e.event_name.replace("admin_note:", "");
+        notesTimeline.push({
+          id: e.id,
+          note: decodeURIComponent(rawNote),
+          createdAt: e.created_at,
+        });
+      } catch {
+        notesTimeline.push({
+          id: e.id,
+          note: e.event_name.replace("admin_note:", ""),
+          createdAt: e.created_at,
+        });
+      }
+    }
+  });
+
+  const latestNote = r.admin_notes || (notesTimeline.length > 0 ? notesTimeline[0].note : "");
+
+  // 4. Last Contacted Timestamp
+  let lastContactedAt: string | null = r.last_contacted_at || null;
+  if (!lastContactedAt) {
+    const contactEvent = events.find((e: any) =>
+      ["admin_status:followed_up", "admin_status:in_discussion", "admin_status:callback", "admin_status:converted"].includes(
+        e.event_name,
+      ),
+    );
+    if (contactEvent) {
+      lastContactedAt = contactEvent.created_at;
+    }
+  }
+
+  // 5. Funnel Stage
+  const vid = Array.isArray(r.video_progress) ? r.video_progress[0] : r.video_progress;
+  const ords = Array.isArray(r.orders) ? r.orders : r.orders ? [r.orders] : [];
+  const latestOrder = ords.sort(
+    (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )[0];
+
+  const videoSec = Number(vid?.last_position_seconds) || 0;
+  const videoCompleted = Boolean(vid?.completion_status);
+  const isPaid = latestOrder?.payment_status === "captured";
+  const hasOrder = Boolean(latestOrder);
+
+  let funnelStage: "registered" | "video_progress" | "video_completed" | "checkout_started" | "paid" = "registered";
+  if (isPaid) {
+    funnelStage = "paid";
+  } else if (hasOrder) {
+    funnelStage = "checkout_started";
+  } else if (videoCompleted) {
+    funnelStage = "video_completed";
+  } else if (videoSec > 0) {
+    funnelStage = "video_progress";
+  }
+
+  return {
+    isRead,
+    leadStatus,
+    adminNotes: latestNote,
+    notesTimeline,
+    lastContactedAt,
+    funnelStage,
+    videoProgressSeconds: videoSec,
+    videoCompleted,
+    latestOrder,
+  };
+}
+
+/**
  * Server function to fetch real-time overview metrics from Supabase (ADMIN ONLY).
  */
 export const getAdminOverviewMetrics = createServerFn({ method: "POST" })
@@ -88,27 +191,35 @@ export const getAdminOverviewMetrics = createServerFn({ method: "POST" })
 
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-      // 1. Total registrations
-      const { count: totalRegistrations } = await supabaseAdmin
+      // 1. Total registrations & detailed items for CRM counts
+      const { data: allRegs } = await supabaseAdmin
         .from("registrations")
-        .select("*", { count: "exact", head: true });
+        .select("id, phone_country_code, phone_number, gender, device_availability, created_at, video_progress(last_position_seconds, completion_status), orders(selected_option, amount, payment_status, created_at), funnel_events(id, event_name, created_at)")
+        .order("created_at", { ascending: false });
 
-      // 2. Training videos completed
-      const { count: videosCompleted } = await supabaseAdmin
-        .from("video_progress")
-        .select("*", { count: "exact", head: true })
-        .eq("completion_status", true);
+      const totalRegistrations = allRegs?.length || 0;
+      let unreadCount = 0;
+      let followedUpCount = 0;
+      let convertedCount = 0;
+      let todayCount = 0;
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
 
-      // 3. Option selections
-      const { count: liveOptionSelected } = await supabaseAdmin
-        .from("orders")
-        .select("*", { count: "exact", head: true })
-        .eq("selected_option", "live");
+      let videosCompleted = 0;
+      let liveOptionSelected = 0;
+      let recordedOptionSelected = 0;
 
-      const { count: recordedOptionSelected } = await supabaseAdmin
-        .from("orders")
-        .select("*", { count: "exact", head: true })
-        .eq("selected_option", "recorded");
+      (allRegs || []).forEach((r: any) => {
+        const crm = parseLeadCRM(r);
+        if (!crm.isRead) unreadCount++;
+        if (["followed_up", "in_discussion", "callback"].includes(crm.leadStatus)) followedUpCount++;
+        if (crm.leadStatus === "converted" || crm.funnelStage === "paid") convertedCount++;
+        if (new Date(r.created_at) >= todayStart) todayCount++;
+
+        if (crm.videoCompleted) videosCompleted++;
+        if (crm.latestOrder?.selected_option === "live") liveOptionSelected++;
+        if (crm.latestOrder?.selected_option === "recorded") recordedOptionSelected++;
+      });
 
       // 4. Total orders created & captured
       const { count: totalOrderAttempts } = await supabaseAdmin
@@ -132,19 +243,19 @@ export const getAdminOverviewMetrics = createServerFn({ method: "POST" })
         .limit(5);
 
       // 6. Recent 5 registrations
-      const { data: recentRegistrations } = await supabaseAdmin
-        .from("registrations")
-        .select("id, phone_country_code, phone_number, device_availability, created_at")
-        .order("created_at", { ascending: false })
-        .limit(5);
+      const recentRegistrations = (allRegs || []).slice(0, 5);
 
       return {
         ok: true,
         data: {
-          totalRegistrations: totalRegistrations || 0,
-          videosCompleted: videosCompleted || 0,
-          liveOptionSelected: liveOptionSelected || 0,
-          recordedOptionSelected: recordedOptionSelected || 0,
+          totalRegistrations,
+          unreadCount,
+          followedUpCount,
+          convertedCount,
+          todayCount,
+          videosCompleted,
+          liveOptionSelected,
+          recordedOptionSelected,
           totalOrderAttempts: totalOrderAttempts || 0,
           verifiedPaymentsCount,
           totalVerifiedRevenue,
@@ -163,20 +274,31 @@ export const getAdminOverviewMetrics = createServerFn({ method: "POST" })
   });
 
 /**
- * Filter schema for registrations table query
+ * Filter schema for registrations / leads table query
  */
 export const registrationsFilterSchema = z.object({
   authToken: z.string().min(1, "Authentication token is required"),
   search: z.string().optional(),
-  completedOnly: z.enum(["all", "completed", "in_progress"]).default("all"),
+  readStatus: z.enum(["all", "read", "unread"]).default("all"),
+  leadStatus: z
+    .enum(["all", "new", "followed_up", "in_discussion", "callback", "converted", "not_interested"])
+    .default("all"),
+  funnelStage: z
+    .enum(["all", "registered", "video_progress", "video_completed", "checkout_started", "paid"])
+    .default("all"),
   selectedOption: z.enum(["all", "live", "recorded", "none"]).default("all"),
-  device: z.enum(["all", "laptop", "desktop", "mobile"]).default("all"),
+  device: z.enum(["all", "laptop", "mobile"]).default("all"),
+  gender: z.enum(["all", "male", "female", "unspecified"]).default("all"),
+  countryCode: z.enum(["all", "india", "international"]).default("all"),
+  datePeriod: z.enum(["all", "today", "yesterday", "last_7_days", "last_30_days"]).default("all"),
+  sortBy: z.enum(["created_at", "video_progress", "last_contacted_at"]).default("created_at"),
+  sortOrder: z.enum(["asc", "desc"]).default("desc"),
   page: z.number().int().min(1).default(1),
   pageSize: z.number().int().min(5).max(100).default(20),
 });
 
 /**
- * Server function to fetch paginated & filtered registrations (ADMIN ONLY).
+ * Server function to fetch paginated & heavily filtered registrations / leads (ADMIN ONLY).
  */
 export const getAdminRegistrations = createServerFn({ method: "POST" })
   .validator((data: unknown) => registrationsFilterSchema.parse(data))
@@ -186,51 +308,52 @@ export const getAdminRegistrations = createServerFn({ method: "POST" })
       await assertAdminAuth(data.authToken);
 
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-      const offset = (data.page - 1) * data.pageSize;
 
-      // Base query
-      let query = supabaseAdmin.from("registrations").select(
-        `
-        id,
-        phone_country_code,
-        phone_number,
-        gender,
-        device_availability,
-        created_at,
-        video_progress(last_position_seconds, completion_status, updated_at),
-        orders(id, selected_option, amount, payment_status, created_at, razorpay_payment_id)
-      `,
-        { count: "exact" },
-      );
+      // Query registrations with relations
+      const { data: rows, error } = await supabaseAdmin
+        .from("registrations")
+        .select(
+          `
+          id,
+          phone_country_code,
+          phone_number,
+          gender,
+          device_availability,
+          created_at,
+          video_progress(last_position_seconds, completion_status, updated_at),
+          orders(id, selected_option, amount, payment_status, created_at, razorpay_payment_id),
+          funnel_events(id, event_name, created_at)
+        `,
+        )
+        .order("created_at", { ascending: false });
 
-      // Search filter (phone number or ID)
-      if (data.search?.trim()) {
-        const s = data.search.trim().replace(/\D/g, "");
-        if (s.length > 0) {
-          query = query.ilike("phone_number", `%${s}%`);
-        } else {
-          query = query.ilike("id", `%${data.search.trim()}%`);
-        }
-      }
-
-      // Device filter
-      if (data.device !== "all") {
-        query = query.ilike("device_availability", `%${data.device}%`);
-      }
-
-      // Order by created_at desc
-      query = query.order("created_at", { ascending: false }).range(offset, offset + data.pageSize - 1);
-
-      const { data: rows, count, error } = await query;
       if (error) throw error;
 
-      // Post-process rows
-      const items = (rows || []).map((r: any) => {
-        const vid = Array.isArray(r.video_progress) ? r.video_progress[0] : r.video_progress;
-        const ords = Array.isArray(r.orders) ? r.orders : r.orders ? [r.orders] : [];
-        const latestOrder = ords.sort(
-          (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
-        )[0];
+      // Global CRM Counts
+      let unreadCount = 0;
+      let followedUpCount = 0;
+      let inDiscussionCount = 0;
+      let convertedCount = 0;
+      let paidCount = 0;
+      let newTodayCount = 0;
+
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
+      const startOf7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const startOf30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      // Map & enrich items
+      const allEnrichedItems = (rows || []).map((r: any) => {
+        const crm = parseLeadCRM(r);
+        const createdAtDate = new Date(r.created_at);
+
+        if (!crm.isRead) unreadCount++;
+        if (crm.leadStatus === "followed_up") followedUpCount++;
+        if (crm.leadStatus === "in_discussion") inDiscussionCount++;
+        if (crm.leadStatus === "converted") convertedCount++;
+        if (crm.funnelStage === "paid") paidCount++;
+        if (createdAtDate >= startOfToday) newTodayCount++;
 
         return {
           id: r.id,
@@ -240,22 +363,128 @@ export const getAdminRegistrations = createServerFn({ method: "POST" })
           gender: r.gender || "—",
           deviceAvailability: r.device_availability || "—",
           createdAt: r.created_at,
-          videoProgressSeconds: vid?.last_position_seconds || 0,
-          videoCompleted: Boolean(vid?.completion_status),
-          selectedOption: latestOrder?.selected_option || "—",
-          paymentStatus: latestOrder?.payment_status || "—",
-          amount: latestOrder?.amount || null,
-          razorpayPaymentId: latestOrder?.razorpay_payment_id || null,
+          createdAtDate,
+          isRead: crm.isRead,
+          leadStatus: crm.leadStatus,
+          adminNotes: crm.adminNotes,
+          notesTimeline: crm.notesTimeline,
+          lastContactedAt: crm.lastContactedAt,
+          funnelStage: crm.funnelStage,
+          videoProgressSeconds: crm.videoProgressSeconds,
+          videoCompleted: crm.videoCompleted,
+          selectedOption: crm.latestOrder?.selected_option || "—",
+          paymentStatus: crm.latestOrder?.payment_status || "—",
+          amount: crm.latestOrder?.amount || null,
+          razorpayPaymentId: crm.latestOrder?.razorpay_payment_id || null,
         };
       });
 
+      // Apply Filters
+      let filtered = allEnrichedItems.filter((item) => {
+        // 1. Search filter
+        if (data.search?.trim()) {
+          const s = data.search.trim().toLowerCase();
+          const sDigits = s.replace(/\D/g, "");
+          const matchPhone = sDigits.length > 0 && item.phoneNumber.includes(sDigits);
+          const matchFull = item.fullPhone.toLowerCase().includes(s);
+          const matchId = item.id.toLowerCase().includes(s);
+          const matchNotes = (item.adminNotes || "").toLowerCase().includes(s);
+          if (!matchPhone && !matchFull && !matchId && !matchNotes) return false;
+        }
+
+        // 2. Read / Unread filter
+        if (data.readStatus === "unread" && item.isRead) return false;
+        if (data.readStatus === "read" && !item.isRead) return false;
+
+        // 3. Lead status filter
+        if (data.leadStatus !== "all" && item.leadStatus !== data.leadStatus) return false;
+
+        // 4. Funnel stage filter
+        if (data.funnelStage !== "all" && item.funnelStage !== data.funnelStage) return false;
+
+        // 5. Selected option filter
+        if (data.selectedOption !== "all") {
+          if (data.selectedOption === "none" && item.selectedOption !== "—") return false;
+          if (data.selectedOption !== "none" && item.selectedOption !== data.selectedOption) return false;
+        }
+
+        // 6. Device filter
+        if (data.device !== "all") {
+          const dev = item.deviceAvailability.toLowerCase();
+          if (data.device === "laptop" && !dev.includes("laptop") && !dev.includes("desktop") && !dev.includes("pc")) {
+            return false;
+          }
+          if (data.device === "mobile" && (dev.includes("laptop") || dev.includes("desktop") || dev.includes("pc"))) {
+            return false;
+          }
+        }
+
+        // 7. Gender filter
+        if (data.gender !== "all") {
+          const g = item.gender.toLowerCase();
+          if (data.gender === "male" && !g.includes("male")) return false;
+          if (data.gender === "female" && !g.includes("female")) return false;
+          if (data.gender === "unspecified" && g !== "—" && !g.includes("other") && !g.includes("prefer")) {
+            return false;
+          }
+        }
+
+        // 8. Country code filter
+        if (data.countryCode !== "all") {
+          const isIndia = item.phoneCountryCode === "+91" || item.phoneCountryCode === "91";
+          if (data.countryCode === "india" && !isIndia) return false;
+          if (data.countryCode === "international" && isIndia) return false;
+        }
+
+        // 9. Date period filter
+        if (data.datePeriod !== "all") {
+          const d = item.createdAtDate;
+          if (data.datePeriod === "today" && d < startOfToday) return false;
+          if (data.datePeriod === "yesterday" && (d < startOfYesterday || d >= startOfToday)) return false;
+          if (data.datePeriod === "last_7_days" && d < startOf7Days) return false;
+          if (data.datePeriod === "last_30_days" && d < startOf30Days) return false;
+        }
+
+        return true;
+      });
+
+      // Sorting
+      filtered.sort((a, b) => {
+        let diff = 0;
+        if (data.sortBy === "video_progress") {
+          diff = b.videoProgressSeconds - a.videoProgressSeconds;
+        } else if (data.sortBy === "last_contacted_at") {
+          const timeA = a.lastContactedAt ? new Date(a.lastContactedAt).getTime() : 0;
+          const timeB = b.lastContactedAt ? new Date(b.lastContactedAt).getTime() : 0;
+          diff = timeB - timeA;
+        } else {
+          diff = b.createdAtDate.getTime() - a.createdAtDate.getTime();
+        }
+
+        return data.sortOrder === "asc" ? -diff : diff;
+      });
+
+      // Pagination
+      const totalFiltered = filtered.length;
+      const offset = (data.page - 1) * data.pageSize;
+      const paginatedItems = filtered.slice(offset, offset + data.pageSize);
+
       return {
         ok: true,
-        items,
-        total: count || 0,
+        items: paginatedItems,
+        total: totalFiltered,
+        globalCounts: {
+          total: allEnrichedItems.length,
+          unread: unreadCount,
+          followedUp: followedUpCount,
+          inDiscussion: inDiscussionCount,
+          converted: convertedCount,
+          paid: paidCount,
+          newToday: newTodayCount,
+        },
         page: data.page,
         pageSize: data.pageSize,
-        totalPages: Math.ceil((count || 0) / data.pageSize) || 1,
+        totalPages: Math.ceil(totalFiltered / data.pageSize) || 1,
       };
     } catch (err: any) {
       console.error("Registrations fetch error:", err.message);
@@ -264,10 +493,180 @@ export const getAdminRegistrations = createServerFn({ method: "POST" })
         error: err.message || "Failed to fetch registrations",
         items: [],
         total: 0,
+        globalCounts: {
+          total: 0,
+          unread: 0,
+          followedUp: 0,
+          inDiscussion: 0,
+          converted: 0,
+          paid: 0,
+          newToday: 0,
+        },
         page: 1,
         pageSize: data.pageSize,
         totalPages: 1,
       };
+    }
+  });
+
+/**
+ * Server function to update a lead's status, read state, and notes in real time (ADMIN ONLY).
+ */
+export const updateAdminLeadStatus = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z
+      .object({
+        authToken: z.string().min(1, "Authentication token is required"),
+        registrationId: z.string().uuid(),
+        leadStatus: z
+          .enum(["new", "followed_up", "in_discussion", "callback", "converted", "not_interested"])
+          .optional(),
+        isRead: z.boolean().optional(),
+        note: z.string().trim().optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) => {
+    try {
+      await assertAdminAuth(data.authToken);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const now = new Date().toISOString();
+
+      // 1. Try updating columns on registrations table directly
+      const updatePayload: Record<string, any> = {};
+      if (data.leadStatus !== undefined) {
+        updatePayload.lead_status = data.leadStatus;
+        if (["followed_up", "in_discussion", "callback", "converted"].includes(data.leadStatus)) {
+          updatePayload.last_contacted_at = now;
+        }
+      }
+      if (data.isRead !== undefined) {
+        updatePayload.is_read = data.isRead;
+      }
+      if (data.note !== undefined && data.note.trim()) {
+        updatePayload.admin_notes = data.note.trim();
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        try {
+          await supabaseAdmin.from("registrations").update(updatePayload).eq("id", data.registrationId);
+        } catch (colErr) {
+          // Schema column fallback handled below
+          console.warn("Direct column update notice:", colErr);
+        }
+      }
+
+      // 2. Persist in funnel_events table for guaranteed durability & real-time sync
+      if (data.leadStatus !== undefined) {
+        await supabaseAdmin.from("funnel_events").insert({
+          registration_id: data.registrationId,
+          event_name: `admin_status:${data.leadStatus}`,
+        });
+      }
+
+      if (data.isRead !== undefined) {
+        await supabaseAdmin.from("funnel_events").insert({
+          registration_id: data.registrationId,
+          event_name: `admin_read:${data.isRead}`,
+        });
+      }
+
+      if (data.note !== undefined && data.note.trim()) {
+        await supabaseAdmin.from("funnel_events").insert({
+          registration_id: data.registrationId,
+          event_name: `admin_note:${encodeURIComponent(data.note.trim())}`,
+        });
+      }
+
+      return {
+        ok: true,
+        registrationId: data.registrationId,
+        leadStatus: data.leadStatus,
+        isRead: data.isRead,
+        note: data.note,
+        updatedAt: now,
+      };
+    } catch (err: any) {
+      console.error("Update lead status error:", err.message);
+      return { ok: false, error: err.message || "Failed to update lead" };
+    }
+  });
+
+/**
+ * Server function to batch update multiple leads (ADMIN ONLY).
+ */
+export const batchUpdateAdminLeads = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z
+      .object({
+        authToken: z.string().min(1, "Authentication token is required"),
+        registrationIds: z.array(z.string().uuid()).min(1),
+        leadStatus: z
+          .enum(["new", "followed_up", "in_discussion", "callback", "converted", "not_interested"])
+          .optional(),
+        isRead: z.boolean().optional(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) => {
+    try {
+      await assertAdminAuth(data.authToken);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const now = new Date().toISOString();
+
+      // Parallel batch updates
+      const eventInserts: Array<{ registration_id: string; event_name: string }> = [];
+
+      data.registrationIds.forEach((regId) => {
+        if (data.leadStatus !== undefined) {
+          eventInserts.push({
+            registration_id: regId,
+            event_name: `admin_status:${data.leadStatus}`,
+          });
+        }
+        if (data.isRead !== undefined) {
+          eventInserts.push({
+            registration_id: regId,
+            event_name: `admin_read:${data.isRead}`,
+          });
+        }
+      });
+
+      if (eventInserts.length > 0) {
+        await supabaseAdmin.from("funnel_events").insert(eventInserts);
+      }
+
+      // Try batch column update if supported
+      const colUpdate: Record<string, any> = {};
+      if (data.leadStatus !== undefined) {
+        colUpdate.lead_status = data.leadStatus;
+        if (["followed_up", "in_discussion", "callback", "converted"].includes(data.leadStatus)) {
+          colUpdate.last_contacted_at = now;
+        }
+      }
+      if (data.isRead !== undefined) {
+        colUpdate.is_read = data.isRead;
+      }
+
+      if (Object.keys(colUpdate).length > 0) {
+        try {
+          await supabaseAdmin.from("registrations").update(colUpdate).in("id", data.registrationIds);
+        } catch {
+          /* ignore */
+        }
+      }
+
+      return {
+        ok: true,
+        updatedCount: data.registrationIds.length,
+        leadStatus: data.leadStatus,
+        isRead: data.isRead,
+      };
+    } catch (err: any) {
+      console.error("Batch update error:", err.message);
+      return { ok: false, error: err.message || "Failed to batch update leads" };
     }
   });
 
@@ -414,9 +813,19 @@ export const getAdminRegistrationDetail = createServerFn({ method: "POST" })
 
       if (error || !reg) throw error || new Error("Registration not found");
 
+      const crm = parseLeadCRM(reg);
+
       return {
         ok: true,
-        data: reg,
+        data: {
+          ...reg,
+          isRead: crm.isRead,
+          leadStatus: crm.leadStatus,
+          adminNotes: crm.adminNotes,
+          notesTimeline: crm.notesTimeline,
+          lastContactedAt: crm.lastContactedAt,
+          funnelStage: crm.funnelStage,
+        },
       };
     } catch (err: any) {
       return {
@@ -428,7 +837,7 @@ export const getAdminRegistrationDetail = createServerFn({ method: "POST" })
   });
 
 /**
- * Server function to generate clean CSV exports for registrations (ADMIN ONLY).
+ * Server function to generate clean CSV exports for registrations / leads (ADMIN ONLY).
  */
 export const exportRegistrationsCsvData = createServerFn({ method: "POST" })
   .validator((data: unknown) => authHeaderSchema.parse(data))
@@ -450,11 +859,12 @@ export const exportRegistrationsCsvData = createServerFn({ method: "POST" })
           device_availability,
           created_at,
           video_progress(last_position_seconds, completion_status),
-          orders(selected_option, amount, payment_status, razorpay_payment_id)
+          orders(selected_option, amount, payment_status, razorpay_payment_id),
+          funnel_events(id, event_name, created_at)
         `,
         )
         .order("created_at", { ascending: false })
-        .limit(1000);
+        .limit(2000);
 
       if (error) throw error;
 
@@ -462,38 +872,50 @@ export const exportRegistrationsCsvData = createServerFn({ method: "POST" })
         "Registration ID",
         "Country Code",
         "Phone Number",
+        "Full Phone",
+        "Lead Status",
+        "Read Status",
         "Gender",
         "Device",
         "Video Watched (Sec)",
         "Video Completed",
+        "Funnel Stage",
         "Selected Option",
         "Payment Status",
         "Amount (INR)",
         "Transaction ID",
+        "Admin Notes",
+        "Last Contacted Date",
         "Registered Date",
       ];
 
       const csvRows = (rows || []).map((r: any) => {
-        const vid = Array.isArray(r.video_progress) ? r.video_progress[0] : r.video_progress;
+        const crm = parseLeadCRM(r);
         const ord = Array.isArray(r.orders) ? r.orders[0] : r.orders;
         return [
           `"${r.id}"`,
           `"${r.phone_country_code || "+91"}"`,
           `"${r.phone_number}"`,
+          `"${r.phone_country_code || "+91"} ${r.phone_number}"`,
+          `"${crm.leadStatus.toUpperCase()}"`,
+          crm.isRead ? "READ" : "UNREAD",
           `"${r.gender || ""}"`,
           `"${r.device_availability || ""}"`,
-          vid?.last_position_seconds || 0,
-          vid?.completion_status ? "YES" : "NO",
+          crm.videoProgressSeconds,
+          crm.videoCompleted ? "YES" : "NO",
+          `"${crm.funnelStage.toUpperCase()}"`,
           `"${ord?.selected_option || ""}"`,
           `"${ord?.payment_status || ""}"`,
           ord?.amount || "",
           `"${ord?.razorpay_payment_id || ""}"`,
+          `"${(crm.adminNotes || "").replace(/"/g, '""')}"`,
+          `"${crm.lastContactedAt ? new Date(crm.lastContactedAt).toISOString() : ""}"`,
           `"${new Date(r.created_at).toISOString()}"`,
         ].join(",");
       });
 
       const csvContent = [headers.join(","), ...csvRows].join("\n");
-      return { ok: true, csvContent, filename: `pendugpt_registrations_${Date.now()}.csv` };
+      return { ok: true, csvContent, filename: `pendugpt_leads_${Date.now()}.csv` };
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
@@ -528,7 +950,7 @@ export const exportOrdersCsvData = createServerFn({ method: "POST" })
         `,
         )
         .order("created_at", { ascending: false })
-        .limit(1000);
+        .limit(2000);
 
       if (error) throw error;
 

@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
   getAdminOverviewMetrics,
   getAdminRegistrations,
   getAdminOrders,
   getAdminRegistrationDetail,
+  updateAdminLeadStatus,
+  batchUpdateAdminLeads,
   exportRegistrationsCsvData,
   exportOrdersCsvData,
 } from "@/lib/admin.functions";
@@ -40,6 +42,19 @@ import {
   Menu,
   KeyRound,
   ShieldAlert,
+  MessageSquare,
+  Phone,
+  Filter,
+  SlidersHorizontal,
+  CheckSquare,
+  Square,
+  UserCheck,
+  FileText,
+  Send,
+  Calendar,
+  Tag,
+  Globe,
+  ChevronDown,
 } from "lucide-react";
 
 const ADMIN_PASSCODE = "PenduGPT2026";
@@ -162,7 +177,7 @@ export function AdminDashboard() {
                   ADMIN
                 </span>
               </div>
-              <p className="text-[11px] text-zinc-400">Control & Analytics</p>
+              <p className="text-[11px] text-zinc-400">Control & CRM Hub</p>
             </div>
           </div>
           <button
@@ -202,7 +217,7 @@ export function AdminDashboard() {
             }`}
           >
             <Users className="h-4 w-4" />
-            Registrations
+            Leads & Funnel
           </button>
 
           <button
@@ -245,7 +260,7 @@ export function AdminDashboard() {
                 {userEmail}
               </p>
             </div>
-            <p className="mt-0.5 text-[10px] text-zinc-500">Authenticated Admin</p>
+            <p className="mt-0.5 text-[10px] text-zinc-500">Live Database Synced</p>
           </div>
 
           <button
@@ -271,7 +286,7 @@ export function AdminDashboard() {
             </button>
             <h1 className="text-base font-semibold capitalize text-zinc-100 md:text-lg">
               {activeTab === "overview" && "Dashboard Overview"}
-              {activeTab === "registrations" && "Funnel Registrations"}
+              {activeTab === "registrations" && "Leads & Funnel Registrations"}
               {activeTab === "orders" && "Orders & Payments"}
               {activeTab === "settings" && "System Configuration"}
             </h1>
@@ -521,7 +536,7 @@ function AdminOverviewTab({
   authToken: string;
   onNavigate: (tab: any) => void;
   onSignOut: () => void;
-}) {
+  }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -577,6 +592,8 @@ function AdminOverviewTab({
   }
 
   const totalRegs = data?.totalRegistrations || 0;
+  const unreadCount = data?.unreadCount || 0;
+  const followedUpCount = data?.followedUpCount || 0;
   const vidsDone = data?.videosCompleted || 0;
   const liveSelected = data?.liveOptionSelected || 0;
   const recordedSelected = data?.recordedOptionSelected || 0;
@@ -592,8 +609,8 @@ function AdminOverviewTab({
       {/* Top action row */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-white">Live Performance Metrics</h2>
-          <p className="text-xs text-zinc-400">Protected real-time data from database backend</p>
+          <h2 className="text-lg font-bold text-white">Live Performance & CRM Metrics</h2>
+          <p className="text-xs text-zinc-400">Protected real-time data synced from database</p>
         </div>
         <button
           onClick={fetchOverview}
@@ -607,17 +624,30 @@ function AdminOverviewTab({
 
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Total Registrations */}
-        <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-4 backdrop-blur-sm">
+        {/* Total Registrations & Unread */}
+        <div
+          onClick={() => onNavigate("registrations")}
+          className="cursor-pointer rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-4 backdrop-blur-sm transition hover:border-emerald-500/40"
+        >
           <div className="flex items-center justify-between text-zinc-400">
-            <span className="text-xs font-medium">Total Registrations</span>
+            <span className="text-xs font-medium">Total Captured Leads</span>
             <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-400 border border-emerald-500/20">
               <Users className="h-4 w-4" />
             </div>
           </div>
           <div className="mt-3">
             <div className="text-2xl font-bold text-white">{totalRegs}</div>
-            <p className="mt-1 text-[11px] text-zinc-500">Leads captured from landing page</p>
+            <div className="mt-1 flex items-center gap-2 text-[11px]">
+              {unreadCount > 0 ? (
+                <span className="inline-flex items-center gap-1 rounded bg-blue-500/20 px-1.5 py-0.2 font-semibold text-blue-300">
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+                  {unreadCount} Unread
+                </span>
+              ) : (
+                <span className="text-zinc-500">All leads read</span>
+              )}
+              <span className="text-zinc-500">• {followedUpCount} followed up</span>
+            </div>
           </div>
         </div>
 
@@ -636,7 +666,10 @@ function AdminOverviewTab({
         </div>
 
         {/* Verified Payments */}
-        <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-4 backdrop-blur-sm">
+        <div
+          onClick={() => onNavigate("orders")}
+          className="cursor-pointer rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-4 backdrop-blur-sm transition hover:border-green-500/40"
+        >
           <div className="flex items-center justify-between text-zinc-400">
             <span className="text-xs font-medium">Verified Paid Students</span>
             <div className="rounded-lg bg-green-500/10 p-2 text-green-400 border border-green-500/20">
@@ -645,7 +678,7 @@ function AdminOverviewTab({
           </div>
           <div className="mt-3">
             <div className="text-2xl font-bold text-green-400">{paidCount}</div>
-            <p className="mt-1 text-[11px] text-zinc-500">{orderSuccessRate}% of {attempts} checkout attempts</p>
+            <p className="mt-1 text-[11px] text-zinc-500">{orderSuccessRate}% conversion rate</p>
           </div>
         </div>
 
@@ -664,7 +697,7 @@ function AdminOverviewTab({
         </div>
       </div>
 
-      {/* Secondary Metrics: Option breakdown & Checkout stats */}
+      {/* Secondary Metrics */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Option Selection Breakdown */}
         <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-5">
@@ -676,7 +709,7 @@ function AdminOverviewTab({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Video className="h-4 w-4 text-emerald-400" />
-                  <span className="text-xs font-medium text-zinc-200">Option A (Live Batch)</span>
+                  <span className="text-xs font-medium text-zinc-200">Option A (Live Batch ₹5,999)</span>
                 </div>
                 <span className="text-xs font-bold text-emerald-400">{liveSelected}</span>
               </div>
@@ -686,7 +719,7 @@ function AdminOverviewTab({
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Sparkles className="h-4 w-4 text-cyan-400" />
-                  <span className="text-xs font-medium text-zinc-200">Option B (Recorded)</span>
+                  <span className="text-xs font-medium text-zinc-200">Option B (Recorded ₹2,499)</span>
                 </div>
                 <span className="text-xs font-bold text-cyan-400">{recordedSelected}</span>
               </div>
@@ -728,12 +761,12 @@ function AdminOverviewTab({
         {/* Recent Registrations */}
         <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-5">
           <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-white">Latest Registrations</h3>
+            <h3 className="text-sm font-semibold text-white">Latest Leads</h3>
             <button
               onClick={() => onNavigate("registrations")}
               className="text-xs text-emerald-400 hover:underline"
             >
-              View All
+              Manage All Leads
             </button>
           </div>
 
@@ -768,7 +801,7 @@ function AdminOverviewTab({
               onClick={() => onNavigate("orders")}
               className="text-xs text-emerald-400 hover:underline"
             >
-              View All
+              View All Orders
             </button>
           </div>
 
@@ -803,7 +836,60 @@ function AdminOverviewTab({
 
 /**
  * ============================================================================
- * TAB 2: REGISTRATIONS MANAGEMENT COMPONENT
+ * LEAD STATUS BADGE COMPONENT
+ * ============================================================================
+ */
+const LEAD_STATUS_CONFIG: Record<
+  string,
+  { label: string; bg: string; text: string; border: string; icon: any }
+> = {
+  new: {
+    label: "New Lead",
+    bg: "bg-blue-500/15",
+    text: "text-blue-300",
+    border: "border-blue-500/30",
+    icon: Sparkles,
+  },
+  followed_up: {
+    label: "Followed Up",
+    bg: "bg-purple-500/15",
+    text: "text-purple-300",
+    border: "border-purple-500/30",
+    icon: Phone,
+  },
+  in_discussion: {
+    label: "In Discussion",
+    bg: "bg-amber-500/15",
+    text: "text-amber-300",
+    border: "border-amber-500/30",
+    icon: MessageSquare,
+  },
+  callback: {
+    label: "Callback",
+    bg: "bg-cyan-500/15",
+    text: "text-cyan-300",
+    border: "border-cyan-500/30",
+    icon: Clock,
+  },
+  converted: {
+    label: "Converted",
+    bg: "bg-green-500/15",
+    text: "text-green-300",
+    border: "border-green-500/30",
+    icon: CheckCircle2,
+  },
+  not_interested: {
+    label: "Not Interested",
+    bg: "bg-zinc-800",
+    text: "text-zinc-400",
+    border: "border-zinc-700",
+    icon: X,
+  },
+};
+
+/**
+ * ============================================================================
+ * TAB 2: ADVANCED LEADS & REGISTRATIONS CRM COMPONENT
  * ============================================================================
  */
 function AdminRegistrationsTab({
@@ -813,27 +899,75 @@ function AdminRegistrationsTab({
   authToken: string;
   onSignOut: () => void;
 }) {
+  // Filter States
   const [search, setSearch] = useState("");
-  const [device, setDevice] = useState<"all" | "laptop" | "desktop" | "mobile">("all");
+  const [quickTab, setQuickTab] = useState<"all" | "unread" | "followed_up" | "in_discussion" | "converted" | "paid">("all");
+  const [readStatus, setReadStatus] = useState<"all" | "read" | "unread">("all");
+  const [leadStatus, setLeadStatus] = useState<
+    "all" | "new" | "followed_up" | "in_discussion" | "callback" | "converted" | "not_interested"
+  >("all");
+  const [funnelStage, setFunnelStage] = useState<
+    "all" | "registered" | "video_progress" | "video_completed" | "checkout_started" | "paid"
+  >("all");
+  const [selectedOption, setSelectedOption] = useState<"all" | "live" | "recorded" | "none">("all");
+  const [device, setDevice] = useState<"all" | "laptop" | "mobile">("all");
+  const [gender, setGender] = useState<"all" | "male" | "female" | "unspecified">("all");
+  const [countryCode, setCountryCode] = useState<"all" | "india" | "international">("all");
+  const [datePeriod, setDatePeriod] = useState<"all" | "today" | "yesterday" | "last_7_days" | "last_30_days">("all");
+  const [sortBy, setSortBy] = useState<"created_at" | "video_progress" | "last_contacted_at">("created_at");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
+  // UI & Table States
+  const [showFilters, setShowFilters] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<string[]>([]);
+  const [selectedRegId, setSelectedRegId] = useState<string | null>(null);
+
+  // Pagination & Data States
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
-  const [data, setData] = useState<any>({ items: [], total: 0, totalPages: 1 });
+  const [pageSize, setPageSize] = useState(15);
+  const [data, setData] = useState<any>({
+    items: [],
+    total: 0,
+    totalPages: 1,
+    globalCounts: { total: 0, unread: 0, followedUp: 0, inDiscussion: 0, converted: 0, paid: 0, newToday: 0 },
+  });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
-  const [selectedRegId, setSelectedRegId] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const fetchRegistrations = async () => {
+  // Fetch leads with active filters
+  const fetchRegistrations = async (isSilent = false) => {
     try {
-      setLoading(true);
+      if (!isSilent) setLoading(true);
       setAuthError(null);
+
+      // Determine effective filters combining quickTab and specific dropdowns
+      let effectiveReadStatus = readStatus;
+      let effectiveLeadStatus = leadStatus;
+      let effectiveFunnelStage = funnelStage;
+
+      if (quickTab === "unread") effectiveReadStatus = "unread";
+      if (quickTab === "followed_up") effectiveLeadStatus = "followed_up";
+      if (quickTab === "in_discussion") effectiveLeadStatus = "in_discussion";
+      if (quickTab === "converted") effectiveLeadStatus = "converted";
+      if (quickTab === "paid") effectiveFunnelStage = "paid";
+
       const res = await (getAdminRegistrations as any)({
         data: {
           authToken,
           search,
+          readStatus: effectiveReadStatus,
+          leadStatus: effectiveLeadStatus,
+          funnelStage: effectiveFunnelStage,
+          selectedOption,
           device,
-          completedOnly: "all",
-          selectedOption: "all",
+          gender,
+          countryCode,
+          datePeriod,
+          sortBy,
+          sortOrder,
           page,
           pageSize,
         },
@@ -842,19 +976,165 @@ function AdminRegistrationsTab({
       if (res && res.ok) {
         setData(res);
       } else {
-        setAuthError(res?.error || "Unable to fetch registrations.");
+        setAuthError(res?.error || "Unable to fetch leads.");
       }
     } catch (err: any) {
-      setAuthError(err.message || "Failed to load registrations.");
+      setAuthError(err.message || "Failed to load leads.");
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchRegistrations();
-  }, [authToken, search, device, page, pageSize]);
+  }, [
+    authToken,
+    search,
+    quickTab,
+    readStatus,
+    leadStatus,
+    funnelStage,
+    selectedOption,
+    device,
+    gender,
+    countryCode,
+    datePeriod,
+    sortBy,
+    sortOrder,
+    page,
+    pageSize,
+  ]);
 
+  // Real-time Auto-Refresh interval (30s)
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const interval = setInterval(() => {
+      fetchRegistrations(true);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [autoRefresh]);
+
+  // Handle Quick Read/Unread Toggle
+  const handleToggleRead = async (row: any, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const newReadState = !row.isRead;
+
+    // Optimistic UI update
+    setData((prev: any) => ({
+      ...prev,
+      items: prev.items.map((item: any) =>
+        item.id === row.id ? { ...item, isRead: newReadState } : item,
+      ),
+      globalCounts: {
+        ...prev.globalCounts,
+        unread: newReadState ? Math.max(0, prev.globalCounts.unread - 1) : prev.globalCounts.unread + 1,
+      },
+    }));
+
+    try {
+      setUpdatingId(row.id);
+      await (updateAdminLeadStatus as any)({
+        data: {
+          authToken,
+          registrationId: row.id,
+          isRead: newReadState,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to update read state:", err);
+      fetchRegistrations(true);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  // Handle Lead Status Change
+  const handleStatusChange = async (registrationId: string, newStatus: string) => {
+    // Optimistic update
+    setData((prev: any) => ({
+      ...prev,
+      items: prev.items.map((item: any) =>
+        item.id === registrationId ? { ...item, leadStatus: newStatus, isRead: true } : item,
+      ),
+    }));
+
+    try {
+      setUpdatingId(registrationId);
+      await (updateAdminLeadStatus as any)({
+        data: {
+          authToken,
+          registrationId,
+          leadStatus: newStatus,
+          isRead: true,
+        },
+      });
+    } catch (err) {
+      console.error("Failed to update lead status:", err);
+      fetchRegistrations(true);
+    } finally {
+      setUpdatingId(null);
+    }
+  };
+
+  // Handle Bulk Status Update
+  const handleBulkStatusChange = async (newStatus: string) => {
+    if (selectedLeadIds.length === 0) return;
+    try {
+      setLoading(true);
+      await (batchUpdateAdminLeads as any)({
+        data: {
+          authToken,
+          registrationIds: selectedLeadIds,
+          leadStatus: newStatus,
+          isRead: true,
+        },
+      });
+      setSelectedLeadIds([]);
+      await fetchRegistrations();
+    } catch (err) {
+      console.error("Bulk update failed:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Handle Bulk Read/Unread
+  const handleBulkReadState = async (newReadState: boolean) => {
+    if (selectedLeadIds.length === 0) return;
+    try {
+      setLoading(true);
+      await (batchUpdateAdminLeads as any)({
+        data: {
+          authToken,
+          registrationIds: selectedLeadIds,
+          isRead: newReadState,
+        },
+      });
+      setSelectedLeadIds([]);
+      await fetchRegistrations();
+    } catch (err) {
+      console.error("Bulk read update failed:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Select all on current page
+  const handleSelectAll = () => {
+    if (selectedLeadIds.length === data.items.length) {
+      setSelectedLeadIds([]);
+    } else {
+      setSelectedLeadIds(data.items.map((i: any) => i.id));
+    }
+  };
+
+  const handleToggleSelectOne = (id: string) => {
+    setSelectedLeadIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
+    );
+  };
+
+  // Export CSV
   const handleExportCsv = async () => {
     try {
       setExporting(true);
@@ -878,6 +1158,34 @@ function AdminRegistrationsTab({
     }
   };
 
+  // Reset All Filters
+  const handleResetFilters = () => {
+    setSearch("");
+    setQuickTab("all");
+    setReadStatus("all");
+    setLeadStatus("all");
+    setFunnelStage("all");
+    setSelectedOption("all");
+    setDevice("all");
+    setGender("all");
+    setCountryCode("all");
+    setDatePeriod("all");
+    setSortBy("created_at");
+    setSortOrder("desc");
+    setPage(1);
+  };
+
+  const activeFilterCount =
+    (readStatus !== "all" ? 1 : 0) +
+    (leadStatus !== "all" ? 1 : 0) +
+    (funnelStage !== "all" ? 1 : 0) +
+    (selectedOption !== "all" ? 1 : 0) +
+    (device !== "all" ? 1 : 0) +
+    (gender !== "all" ? 1 : 0) +
+    (countryCode !== "all" ? 1 : 0) +
+    (datePeriod !== "all" ? 1 : 0) +
+    (search ? 1 : 0);
+
   if (authError) {
     return (
       <div className="flex h-96 flex-col items-center justify-center rounded-xl border border-red-950/70 bg-[#070304] p-8 text-center">
@@ -894,13 +1202,149 @@ function AdminRegistrationsTab({
     );
   }
 
+  const counts = data.globalCounts || {};
+
   return (
     <div className="space-y-4">
-      {/* Search and Filters Bar */}
-      <div className="flex flex-col gap-3 rounded-xl border border-emerald-950/70 bg-[#040d08]/80 p-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-1 flex-wrap items-center gap-3">
+      {/* Top Quick Status Tabs */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+        <button
+          onClick={() => {
+            setQuickTab("all");
+            setPage(1);
+          }}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 font-semibold transition ${
+            quickTab === "all"
+              ? "bg-emerald-500 text-black shadow-md shadow-emerald-500/20"
+              : "border border-emerald-950/80 bg-[#040d08]/80 text-zinc-400 hover:bg-emerald-950/40 hover:text-zinc-200"
+          }`}
+        >
+          <span>All Leads</span>
+          <span
+            className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+              quickTab === "all" ? "bg-black/20 text-black font-bold" : "bg-zinc-800 text-zinc-400"
+            }`}
+          >
+            {counts.total || 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setQuickTab("unread");
+            setPage(1);
+          }}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 font-semibold transition ${
+            quickTab === "unread"
+              ? "bg-blue-500 text-white shadow-md shadow-blue-500/20"
+              : "border border-blue-950/60 bg-[#030911]/80 text-blue-300 hover:bg-blue-950/40"
+          }`}
+        >
+          <span className="h-2 w-2 rounded-full bg-blue-400 animate-pulse" />
+          <span>Unread Leads</span>
+          <span
+            className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+              quickTab === "unread" ? "bg-black/30 text-white font-bold" : "bg-blue-900/60 text-blue-200"
+            }`}
+          >
+            {counts.unread || 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setQuickTab("followed_up");
+            setPage(1);
+          }}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 font-semibold transition ${
+            quickTab === "followed_up"
+              ? "bg-purple-500 text-white shadow-md shadow-purple-500/20"
+              : "border border-purple-950/60 bg-[#0a0512]/80 text-purple-300 hover:bg-purple-950/40"
+          }`}
+        >
+          <Phone className="h-3 w-3" />
+          <span>Followed Up</span>
+          <span
+            className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+              quickTab === "followed_up" ? "bg-black/30 text-white font-bold" : "bg-purple-900/60 text-purple-200"
+            }`}
+          >
+            {counts.followedUp || 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setQuickTab("in_discussion");
+            setPage(1);
+          }}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 font-semibold transition ${
+            quickTab === "in_discussion"
+              ? "bg-amber-500 text-black shadow-md shadow-amber-500/20"
+              : "border border-amber-950/60 bg-[#0d0903]/80 text-amber-300 hover:bg-amber-950/40"
+          }`}
+        >
+          <MessageSquare className="h-3 w-3" />
+          <span>In Discussion</span>
+          <span
+            className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+              quickTab === "in_discussion" ? "bg-black/20 text-black font-bold" : "bg-amber-900/60 text-amber-200"
+            }`}
+          >
+            {counts.inDiscussion || 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setQuickTab("converted");
+            setPage(1);
+          }}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 font-semibold transition ${
+            quickTab === "converted"
+              ? "bg-green-500 text-black shadow-md shadow-green-500/20"
+              : "border border-green-950/60 bg-[#030d06]/80 text-green-300 hover:bg-green-950/40"
+          }`}
+        >
+          <UserCheck className="h-3 w-3" />
+          <span>Converted</span>
+          <span
+            className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+              quickTab === "converted" ? "bg-black/20 text-black font-bold" : "bg-green-900/60 text-green-200"
+            }`}
+          >
+            {counts.converted || 0}
+          </span>
+        </button>
+
+        <button
+          onClick={() => {
+            setQuickTab("paid");
+            setPage(1);
+          }}
+          className={`flex shrink-0 items-center gap-2 rounded-lg px-3.5 py-2 font-semibold transition ${
+            quickTab === "paid"
+              ? "bg-emerald-400 text-black shadow-md shadow-emerald-400/20"
+              : "border border-emerald-950/60 bg-[#030d08]/80 text-emerald-300 hover:bg-emerald-950/40"
+          }`}
+        >
+          <CreditCard className="h-3 w-3" />
+          <span>Paid Orders</span>
+          <span
+            className={`rounded-full px-1.5 py-0.2 text-[10px] ${
+              quickTab === "paid" ? "bg-black/20 text-black font-bold" : "bg-emerald-900/60 text-emerald-200"
+            }`}
+          >
+            {counts.paid || 0}
+          </span>
+        </button>
+      </div>
+
+      {/* Main Filter & Action Bar */}
+      <div className="rounded-xl border border-emerald-950/70 bg-[#040d08]/85 p-4 space-y-3 backdrop-blur-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           {/* Search Input */}
-          <div className="relative min-w-[240px] flex-1">
+          <div className="relative flex-1 min-w-[260px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" />
             <input
               type="text"
@@ -910,169 +1354,555 @@ function AdminRegistrationsTab({
                 setPage(1);
               }}
               placeholder=""
-              className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2 pl-9 pr-3 text-xs text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
+              className="w-full rounded-lg border border-emerald-950/80 bg-black/60 py-2 pl-9 pr-8 text-xs text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
             />
+            {search && (
+              <button
+                onClick={() => {
+                  setSearch("");
+                  setPage(1);
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
 
-          {/* Device Filter */}
-          <select
-            value={device}
-            onChange={(e: any) => {
-              setDevice(e.target.value);
-              setPage(1);
-            }}
-            className="rounded-lg border border-emerald-950/80 bg-black/60 px-3 py-2 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
-          >
-            <option value="all">All Devices</option>
-            <option value="laptop">Laptop</option>
-            <option value="desktop">Desktop</option>
-            <option value="mobile">Mobile</option>
-          </select>
+          {/* Filter Toggle & Action Buttons */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-semibold transition ${
+                showFilters || activeFilterCount > 0
+                  ? "border-emerald-500/50 bg-emerald-500/15 text-emerald-300"
+                  : "border-emerald-950/80 bg-black/60 text-zinc-400 hover:text-zinc-200"
+              }`}
+            >
+              <SlidersHorizontal className="h-3.5 w-3.5" />
+              <span>Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="rounded-full bg-emerald-500 px-1.5 py-0.2 text-[10px] font-bold text-black">
+                  {activeFilterCount}
+                </span>
+              )}
+            </button>
+
+            {/* Auto Refresh Toggle */}
+            <button
+              onClick={() => setAutoRefresh(!autoRefresh)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition ${
+                autoRefresh
+                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                  : "border-emerald-950/80 bg-black/60 text-zinc-500 hover:text-zinc-400"
+              }`}
+              title="Real-time 30s auto-refresh"
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${autoRefresh ? "bg-emerald-400 animate-pulse" : "bg-zinc-600"}`} />
+              <span>Live Sync</span>
+            </button>
+
+            {/* Manual Refresh */}
+            <button
+              onClick={() => fetchRegistrations()}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-3 py-2 text-xs font-medium text-emerald-400 hover:bg-emerald-900/50 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              <span>Refresh</span>
+            </button>
+
+            {/* Export CSV */}
+            <button
+              onClick={handleExportCsv}
+              disabled={exporting}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-bold text-black shadow-sm shadow-emerald-500/20 hover:bg-emerald-400 disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>{exporting ? "Exporting..." : "Export CSV"}</span>
+            </button>
+          </div>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchRegistrations}
-            disabled={loading}
-            className="flex items-center gap-1.5 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-3 py-2 text-xs font-medium text-emerald-400 hover:bg-emerald-900/50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </button>
+        {/* Collapsible Advanced Filters Panel */}
+        {showFilters && (
+          <div className="pt-3 border-t border-emerald-950/70 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6 text-xs animate-in fade-in duration-150">
+            {/* Lead Status */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Lead Status</label>
+              <select
+                value={leadStatus}
+                onChange={(e: any) => {
+                  setLeadStatus(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All Statuses</option>
+                <option value="new">New Lead</option>
+                <option value="followed_up">Followed Up</option>
+                <option value="in_discussion">In Discussion</option>
+                <option value="callback">Callback Scheduled</option>
+                <option value="converted">Converted</option>
+                <option value="not_interested">Not Interested</option>
+              </select>
+            </div>
 
-          <button
-            onClick={handleExportCsv}
-            disabled={exporting}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-bold text-black shadow-sm shadow-emerald-500/20 hover:bg-emerald-400 disabled:opacity-50"
-          >
-            <Download className="h-3.5 w-3.5" />
-            <span>{exporting ? "Exporting..." : "Export CSV"}</span>
-          </button>
-        </div>
+            {/* Read / Unread */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Read State</label>
+              <select
+                value={readStatus}
+                onChange={(e: any) => {
+                  setReadStatus(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All (Read & Unread)</option>
+                <option value="unread">Unread Only</option>
+                <option value="read">Read Only</option>
+              </select>
+            </div>
+
+            {/* Funnel Stage */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Funnel Stage</label>
+              <select
+                value={funnelStage}
+                onChange={(e: any) => {
+                  setFunnelStage(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All Stages</option>
+                <option value="registered">Registered (0%)</option>
+                <option value="video_progress">Video In Progress</option>
+                <option value="video_completed">Video Completed</option>
+                <option value="checkout_started">Checkout Initiated</option>
+                <option value="paid">Payment Completed</option>
+              </select>
+            </div>
+
+            {/* Course Track */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Course Track</label>
+              <select
+                value={selectedOption}
+                onChange={(e: any) => {
+                  setSelectedOption(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All Tracks</option>
+                <option value="live">Option A (Live ₹5,999)</option>
+                <option value="recorded">Option B (Recorded ₹2,499)</option>
+                <option value="none">No Track Chosen</option>
+              </select>
+            </div>
+
+            {/* Device */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Device Type</label>
+              <select
+                value={device}
+                onChange={(e: any) => {
+                  setDevice(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All Devices</option>
+                <option value="laptop">Laptop / Desktop</option>
+                <option value="mobile">Mobile Phone Only</option>
+              </select>
+            </div>
+
+            {/* Date Period */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Date Registered</label>
+              <select
+                value={datePeriod}
+                onChange={(e: any) => {
+                  setDatePeriod(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All Time</option>
+                <option value="today">Today</option>
+                <option value="yesterday">Yesterday</option>
+                <option value="last_7_days">Last 7 Days</option>
+                <option value="last_30_days">Last 30 Days</option>
+              </select>
+            </div>
+
+            {/* Country */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Region</label>
+              <select
+                value={countryCode}
+                onChange={(e: any) => {
+                  setCountryCode(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All Countries</option>
+                <option value="india">India (+91)</option>
+                <option value="international">International</option>
+              </select>
+            </div>
+
+            {/* Gender */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Gender</label>
+              <select
+                value={gender}
+                onChange={(e: any) => {
+                  setGender(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="all">All Genders</option>
+                <option value="male">Male</option>
+                <option value="female">Female</option>
+                <option value="unspecified">Unspecified</option>
+              </select>
+            </div>
+
+            {/* Sort Order */}
+            <div>
+              <label className="block text-[11px] font-medium text-zinc-400 mb-1">Sort By</label>
+              <select
+                value={sortBy}
+                onChange={(e: any) => {
+                  setSortBy(e.target.value);
+                  setPage(1);
+                }}
+                className="w-full rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 text-xs text-zinc-300 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="created_at">Registered Date</option>
+                <option value="video_progress">Video Watch %</option>
+                <option value="last_contacted_at">Last Followed Up</option>
+              </select>
+            </div>
+
+            {/* Reset Button */}
+            <div className="flex items-end lg:col-span-3">
+              <button
+                onClick={handleResetFilters}
+                className="rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-zinc-800"
+              >
+                Reset All Filters
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Registrations Table */}
+      {/* Floating Bulk Action Bar (Visible when leads are selected) */}
+      {selectedLeadIds.length > 0 && (
+        <div className="flex items-center justify-between rounded-xl border border-emerald-500/40 bg-[#04160d] p-3 text-xs text-white shadow-xl animate-in slide-in-from-top-2 duration-150">
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-black">
+              {selectedLeadIds.length}
+            </span>
+            <span className="font-semibold text-emerald-300">Leads Selected</span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => handleBulkReadState(true)}
+              className="flex items-center gap-1 rounded-lg border border-emerald-900/40 bg-black/40 px-2.5 py-1.5 font-medium text-emerald-300 hover:bg-emerald-950"
+            >
+              <Check className="h-3 w-3" />
+              <span>Mark Read</span>
+            </button>
+
+            <button
+              onClick={() => handleBulkReadState(false)}
+              className="flex items-center gap-1 rounded-lg border border-blue-900/40 bg-black/40 px-2.5 py-1.5 font-medium text-blue-300 hover:bg-blue-950"
+            >
+              <Clock className="h-3 w-3" />
+              <span>Mark Unread</span>
+            </button>
+
+            <button
+              onClick={() => handleBulkStatusChange("followed_up")}
+              className="flex items-center gap-1 rounded-lg border border-purple-900/40 bg-black/40 px-2.5 py-1.5 font-medium text-purple-300 hover:bg-purple-950"
+            >
+              <Phone className="h-3 w-3" />
+              <span>Mark Followed Up</span>
+            </button>
+
+            <button
+              onClick={() => handleBulkStatusChange("in_discussion")}
+              className="flex items-center gap-1 rounded-lg border border-amber-900/40 bg-black/40 px-2.5 py-1.5 font-medium text-amber-300 hover:bg-amber-950"
+            >
+              <MessageSquare className="h-3 w-3" />
+              <span>In Discussion</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedLeadIds([])}
+              className="rounded-lg p-1 text-zinc-400 hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Registrations / Leads Table */}
       <div className="overflow-x-auto rounded-xl border border-emerald-950/70 bg-[#040d08]/80">
         <table className="w-full text-left text-xs">
           <thead className="border-b border-emerald-950/80 bg-black/40 text-zinc-400">
             <tr>
-              <th className="px-4 py-3 font-semibold">Contact / Phone</th>
-              <th className="px-4 py-3 font-semibold">Device</th>
-              <th className="px-4 py-3 font-semibold">Video Status</th>
-              <th className="px-4 py-3 font-semibold">Track</th>
-              <th className="px-4 py-3 font-semibold">Payment</th>
-              <th className="px-4 py-3 font-semibold">Registered</th>
-              <th className="px-4 py-3 text-right font-semibold">Action</th>
+              <th className="w-8 px-3 py-3 text-center">
+                <button
+                  onClick={handleSelectAll}
+                  className="text-zinc-400 hover:text-zinc-200"
+                  title="Select all on this page"
+                >
+                  {selectedLeadIds.length > 0 && selectedLeadIds.length === data.items.length ? (
+                    <CheckSquare className="h-4 w-4 text-emerald-400" />
+                  ) : (
+                    <Square className="h-4 w-4" />
+                  )}
+                </button>
+              </th>
+              <th className="w-6 px-1 py-3 text-center font-semibold" title="Read / Unread State">
+                •
+              </th>
+              <th className="px-3 py-3 font-semibold">Contact / Phone</th>
+              <th className="px-3 py-3 font-semibold">Lead Status</th>
+              <th className="px-3 py-3 font-semibold">Funnel Progress</th>
+              <th className="px-3 py-3 font-semibold">Track & Payment</th>
+              <th className="px-3 py-3 font-semibold">Device</th>
+              <th className="px-3 py-3 font-semibold">Registered</th>
+              <th className="px-3 py-3 text-right font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-emerald-950/40 text-zinc-300">
             {loading ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-zinc-500">
+                <td colSpan={9} className="py-12 text-center text-zinc-500">
                   <RefreshCw className="mx-auto h-5 w-5 animate-spin text-emerald-500" />
-                  <p className="mt-2">Loading registrations securely...</p>
+                  <p className="mt-2">Loading leads securely...</p>
                 </td>
               </tr>
             ) : data.items.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-12 text-center text-zinc-500">
+                <td colSpan={9} className="py-12 text-center text-zinc-500">
                   <Users className="mx-auto h-8 w-8 text-zinc-600" />
-                  <p className="mt-2 text-sm font-medium text-zinc-400">No matching registrations found</p>
-                  <p className="text-xs text-zinc-600">Try adjusting your search query or device filter.</p>
+                  <p className="mt-2 text-sm font-medium text-zinc-400">No matching leads found</p>
+                  <p className="text-xs text-zinc-600">Try adjusting your filters or search term.</p>
                 </td>
               </tr>
             ) : (
-              data.items.map((row: any) => (
-                <tr key={row.id} className="transition-colors hover:bg-emerald-950/20">
-                  {/* Phone */}
-                  <td className="px-4 py-3 font-mono font-medium text-zinc-100">
-                    <div>{row.fullPhone}</div>
-                    <div className="text-[10px] text-zinc-500 truncate max-w-[120px]" title={row.id}>
-                      ID: {row.id.slice(0, 8)}...
-                    </div>
-                  </td>
+              data.items.map((row: any) => {
+                const statusConfig =
+                  LEAD_STATUS_CONFIG[row.leadStatus] || LEAD_STATUS_CONFIG["new"];
+                const isSelected = selectedLeadIds.includes(row.id);
+                const cleanPhoneDigits = (row.phoneCountryCode + row.phoneNumber).replace(/\D/g, "");
+                const waText = encodeURIComponent(
+                  "Hello! This is from PenduGPT Masterclass. We saw you registered for our training. How can we help you get started?",
+                );
+                const waUrl = `https://wa.me/${cleanPhoneDigits}?text=${waText}`;
 
-                  {/* Device */}
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1 rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-300">
-                      {row.deviceAvailability.toLowerCase().includes("laptop") ? (
-                        <Laptop className="h-3 w-3 text-emerald-400" />
-                      ) : (
-                        <Smartphone className="h-3 w-3 text-zinc-400" />
+                return (
+                  <tr
+                    key={row.id}
+                    className={`transition-colors hover:bg-emerald-950/25 ${
+                      !row.isRead ? "bg-emerald-950/10 font-medium" : ""
+                    } ${isSelected ? "bg-emerald-950/30" : ""}`}
+                  >
+                    {/* Checkbox */}
+                    <td className="px-3 py-3 text-center">
+                      <button
+                        onClick={() => handleToggleSelectOne(row.id)}
+                        className="text-zinc-400 hover:text-zinc-200"
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="h-4 w-4 text-emerald-400" />
+                        ) : (
+                          <Square className="h-4 w-4" />
+                        )}
+                      </button>
+                    </td>
+
+                    {/* Unread / Read Indicator */}
+                    <td className="px-1 py-3 text-center">
+                      <button
+                        onClick={(e) => handleToggleRead(row, e)}
+                        className="group relative"
+                        title={row.isRead ? "Mark as Unread" : "Mark as Read"}
+                      >
+                        {!row.isRead ? (
+                          <span className="block h-2.5 w-2.5 rounded-full bg-blue-500 shadow-sm shadow-blue-500/50 group-hover:scale-125 transition" />
+                        ) : (
+                          <span className="block h-2 w-2 rounded-full bg-zinc-700 opacity-40 group-hover:opacity-100 group-hover:bg-zinc-500 transition" />
+                        )}
+                      </button>
+                    </td>
+
+                    {/* Contact & Phone */}
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-bold text-zinc-100">{row.fullPhone}</span>
+                        {/* Quick WhatsApp Link */}
+                        <a
+                          href={waUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex h-5 w-5 items-center justify-center rounded bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-black transition"
+                          title="Chat on WhatsApp"
+                        >
+                          <MessageSquare className="h-3 w-3" />
+                        </a>
+                        {/* Quick Call Link */}
+                        <a
+                          href={`tel:${row.fullPhone}`}
+                          className="flex h-5 w-5 items-center justify-center rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition"
+                          title="Call Number"
+                        >
+                          <Phone className="h-3 w-3" />
+                        </a>
+                      </div>
+                      <div className="text-[10px] text-zinc-500 font-mono">
+                        ID: {row.id.slice(0, 8)}...
+                      </div>
+                      {row.adminNotes && (
+                        <div className="mt-1 flex items-center gap-1 text-[10px] text-amber-300 truncate max-w-[200px]" title={row.adminNotes}>
+                          <FileText className="h-3 w-3 shrink-0" />
+                          <span>{row.adminNotes}</span>
+                        </div>
                       )}
-                      <span className="capitalize">{row.deviceAvailability}</span>
-                    </span>
-                  </td>
+                    </td>
 
-                  {/* Video status */}
-                  <td className="px-4 py-3">
-                    {row.videoCompleted ? (
-                      <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold text-emerald-300 border border-emerald-500/30">
-                        <Check className="h-3 w-3" />
-                        Completed
+                    {/* Interactive Lead Status Dropdown */}
+                    <td className="px-3 py-3">
+                      <div className="relative inline-block">
+                        <select
+                          value={row.leadStatus}
+                          onChange={(e) => handleStatusChange(row.id, e.target.value)}
+                          className={`appearance-none rounded-lg border px-2.5 py-1 pr-6 text-[11px] font-bold uppercase transition focus:outline-none cursor-pointer ${statusConfig.bg} ${statusConfig.text} ${statusConfig.border}`}
+                        >
+                          <option value="new" className="bg-zinc-900 text-zinc-200">
+                            🆕 New Lead
+                          </option>
+                          <option value="followed_up" className="bg-zinc-900 text-zinc-200">
+                            📞 Followed Up
+                          </option>
+                          <option value="in_discussion" className="bg-zinc-900 text-zinc-200">
+                            💬 In Discussion
+                          </option>
+                          <option value="callback" className="bg-zinc-900 text-zinc-200">
+                            ⏰ Callback
+                          </option>
+                          <option value="converted" className="bg-zinc-900 text-zinc-200">
+                            🎓 Converted
+                          </option>
+                          <option value="not_interested" className="bg-zinc-900 text-zinc-200">
+                            🚫 Not Interested
+                          </option>
+                        </select>
+                        <ChevronDown className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 opacity-70" />
+                      </div>
+                      {row.lastContactedAt && (
+                        <div className="mt-0.5 text-[9px] text-zinc-500">
+                          Followed up: {new Date(row.lastContactedAt).toLocaleDateString()}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Funnel Progress */}
+                    <td className="px-3 py-3">
+                      {row.videoCompleted ? (
+                        <span className="inline-flex items-center gap-1 rounded bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 border border-emerald-500/30">
+                          <Check className="h-3 w-3" />
+                          Video Done (100%)
+                        </span>
+                      ) : row.videoProgressSeconds > 0 ? (
+                        <div>
+                          <span className="inline-flex items-center gap-1 rounded bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-300">
+                            <Clock className="h-3 w-3 text-zinc-400" />
+                            {Math.floor(row.videoProgressSeconds / 60)}m watched
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-zinc-500">Not started</span>
+                      )}
+                    </td>
+
+                    {/* Track & Payment */}
+                    <td className="px-3 py-3">
+                      <div>
+                        {row.selectedOption !== "—" ? (
+                          <span className="font-semibold uppercase text-emerald-300">{row.selectedOption} Track</span>
+                        ) : (
+                          <span className="text-zinc-600">—</span>
+                        )}
+                      </div>
+                      <div className="mt-0.5">
+                        {row.paymentStatus === "captured" ? (
+                          <span className="rounded bg-green-500/20 px-1.5 py-0.2 text-[10px] font-bold uppercase text-green-300 border border-green-500/30">
+                            Paid ₹{row.amount}
+                          </span>
+                        ) : row.paymentStatus === "pending" ? (
+                          <span className="rounded bg-amber-500/20 px-1.5 py-0.2 text-[10px] font-semibold uppercase text-amber-300 border border-amber-500/30">
+                            Checkout Open
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+
+                    {/* Device */}
+                    <td className="px-3 py-3">
+                      <span className="inline-flex items-center gap-1 rounded bg-zinc-900 px-2 py-0.5 text-[10px] text-zinc-300">
+                        {row.deviceAvailability.toLowerCase().includes("laptop") ? (
+                          <Laptop className="h-3 w-3 text-emerald-400" />
+                        ) : (
+                          <Smartphone className="h-3 w-3 text-zinc-400" />
+                        )}
+                        <span className="capitalize">{row.deviceAvailability.slice(0, 10)}</span>
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 rounded bg-zinc-900 px-2 py-0.5 text-[11px] text-zinc-400">
-                        <Clock className="h-3 w-3 text-zinc-500" />
-                        {Math.floor(row.videoProgressSeconds / 60)}m watched
-                      </span>
-                    )}
-                  </td>
+                    </td>
 
-                  {/* Selected Option */}
-                  <td className="px-4 py-3">
-                    {row.selectedOption !== "—" ? (
-                      <span className="font-semibold uppercase text-emerald-300">{row.selectedOption}</span>
-                    ) : (
-                      <span className="text-zinc-600">—</span>
-                    )}
-                  </td>
+                    {/* Registered Date */}
+                    <td className="px-3 py-3 text-zinc-400">
+                      <div>{new Date(row.createdAt).toLocaleDateString()}</div>
+                      <div className="text-[10px] text-zinc-500">
+                        {new Date(row.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                    </td>
 
-                  {/* Payment Status */}
-                  <td className="px-4 py-3">
-                    {row.paymentStatus === "captured" ? (
-                      <span className="rounded bg-green-500/20 px-2 py-0.5 text-[10px] font-bold uppercase text-green-300 border border-green-500/30">
-                        Paid (₹{row.amount})
-                      </span>
-                    ) : row.paymentStatus === "pending" ? (
-                      <span className="rounded bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-300 border border-amber-500/30">
-                        Checkout Started
-                      </span>
-                    ) : (
-                      <span className="text-zinc-600">—</span>
-                    )}
-                  </td>
-
-                  {/* Registered Date */}
-                  <td className="px-4 py-3 text-zinc-400">
-                    <div>{new Date(row.createdAt).toLocaleDateString()}</div>
-                    <div className="text-[10px] text-zinc-500">
-                      {new Date(row.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </div>
-                  </td>
-
-                  {/* Action */}
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setSelectedRegId(row.id)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-2.5 py-1 text-[11px] font-medium text-emerald-400 hover:bg-emerald-900/60"
-                    >
-                      <Eye className="h-3 w-3" />
-                      <span>Details</span>
-                    </button>
-                  </td>
-                </tr>
-              ))
+                    {/* Action */}
+                    <td className="px-3 py-3 text-right">
+                      <button
+                        onClick={() => setSelectedRegId(row.id)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-2.5 py-1 text-[11px] font-medium text-emerald-400 hover:bg-emerald-900/60 transition"
+                      >
+                        <Eye className="h-3 w-3" />
+                        <span>CRM & Notes</span>
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
 
         {/* Pagination Bar */}
-        <div className="flex items-center justify-between border-t border-emerald-950/80 bg-black/40 px-4 py-3 text-xs text-zinc-400">
+        <div className="flex flex-col gap-2 border-t border-emerald-950/80 bg-black/40 px-4 py-3 text-xs text-zinc-400 sm:flex-row sm:items-center sm:justify-between">
           <div>
             Showing {data.items.length > 0 ? (page - 1) * pageSize + 1 : 0} to{" "}
-            {Math.min(page * pageSize, data.total)} of {data.total} entries
+            {Math.min(page * pageSize, data.total)} of {data.total} matching leads
           </div>
 
           <div className="flex items-center gap-2">
@@ -1097,9 +1927,16 @@ function AdminRegistrationsTab({
         </div>
       </div>
 
-      {/* Registration Details Drawer */}
+      {/* Lead Detail & Follow-up Drawer */}
       {selectedRegId && (
-        <RegistrationDetailDrawer authToken={authToken} registrationId={selectedRegId} onClose={() => setSelectedRegId(null)} />
+        <RegistrationDetailDrawer
+          authToken={authToken}
+          registrationId={selectedRegId}
+          onClose={() => {
+            setSelectedRegId(null);
+            fetchRegistrations(true);
+          }}
+        />
       )}
     </div>
   );
@@ -1107,7 +1944,7 @@ function AdminRegistrationsTab({
 
 /**
  * ============================================================================
- * REGISTRATION DETAIL DRAWER COMPONENT
+ * REGISTRATION & LEAD CRM DETAIL DRAWER COMPONENT
  * ============================================================================
  */
 function RegistrationDetailDrawer({
@@ -1122,23 +1959,30 @@ function RegistrationDetailDrawer({
   const [detail, setDetail] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [noteInput, setNoteInput] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+  const [leadStatus, setLeadStatus] = useState("new");
+  const [isRead, setIsRead] = useState(false);
+
+  const fetchDetail = async () => {
+    try {
+      setLoading(true);
+      const res = await (getAdminRegistrationDetail as any)({
+        data: { authToken, id: registrationId },
+      });
+      if (res && res.ok) {
+        setDetail(res.data);
+        setLeadStatus(res.data.leadStatus || "new");
+        setIsRead(res.data.isRead || false);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchDetail = async () => {
-      try {
-        setLoading(true);
-        const res = await (getAdminRegistrationDetail as any)({
-          data: { authToken, id: registrationId },
-        });
-        if (res && res.ok) {
-          setDetail(res.data);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
     fetchDetail();
   }, [authToken, registrationId]);
 
@@ -1148,14 +1992,86 @@ function RegistrationDetailDrawer({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Add note & save in real-time
+  const handleAddNote = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!noteInput.trim()) return;
+
+    try {
+      setSavingNote(true);
+      const res = await (updateAdminLeadStatus as any)({
+        data: {
+          authToken,
+          registrationId,
+          note: noteInput.trim(),
+          isRead: true,
+        },
+      });
+
+      if (res && res.ok) {
+        setNoteInput("");
+        await fetchDetail();
+      }
+    } catch (err) {
+      console.error("Failed to add note:", err);
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  // Update Status directly in drawer
+  const handleDrawerStatusChange = async (newStatus: string) => {
+    setLeadStatus(newStatus);
+    setIsRead(true);
+    try {
+      await (updateAdminLeadStatus as any)({
+        data: {
+          authToken,
+          registrationId,
+          leadStatus: newStatus,
+          isRead: true,
+        },
+      });
+      await fetchDetail();
+    } catch (err) {
+      console.error("Status update error:", err);
+    }
+  };
+
+  // Toggle Read directly in drawer
+  const handleDrawerReadToggle = async () => {
+    const nextRead = !isRead;
+    setIsRead(nextRead);
+    try {
+      await (updateAdminLeadStatus as any)({
+        data: {
+          authToken,
+          registrationId,
+          isRead: nextRead,
+        },
+      });
+      await fetchDetail();
+    } catch (err) {
+      console.error("Read update error:", err);
+    }
+  };
+
+  const phoneDigits = detail
+    ? (detail.phone_country_code + detail.phone_number).replace(/\D/g, "")
+    : "";
+  const waText = encodeURIComponent(
+    "Hello! This is from PenduGPT Masterclass. We saw you registered for our training. How can we help you get started?",
+  );
+  const waUrl = `https://wa.me/${phoneDigits}?text=${waText}`;
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="flex h-full w-full max-w-lg flex-col border-l border-emerald-950/80 bg-[#030a06] text-zinc-100 shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-emerald-950/80 px-6 py-4">
           <div>
-            <h3 className="text-base font-bold text-white">Learner Profile</h3>
-            <p className="text-xs text-zinc-400">Complete journey & transaction log</p>
+            <h3 className="text-base font-bold text-white">Lead CRM Profile</h3>
+            <p className="text-xs text-zinc-400">Complete interaction log & journey</p>
           </div>
           <button
             onClick={onClose}
@@ -1175,7 +2091,69 @@ function RegistrationDetailDrawer({
             <p className="text-sm text-zinc-400">No details found for this registration.</p>
           ) : (
             <>
-              {/* ID & Phone Card */}
+              {/* Status & Quick Action Card */}
+              <div className="rounded-xl border border-emerald-950/70 bg-black/40 p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-300">Lead Status</span>
+                  <button
+                    onClick={handleDrawerReadToggle}
+                    className={`flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-bold ${
+                      isRead
+                        ? "bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
+                        : "bg-blue-500/20 text-blue-300 border border-blue-500/40"
+                    }`}
+                  >
+                    {!isRead && <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />}
+                    <span>{isRead ? "Mark as Unread" : "Mark as Read"}</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-1.5 text-xs">
+                  {[
+                    { id: "new", label: "New Lead", color: "hover:border-blue-500" },
+                    { id: "followed_up", label: "Followed Up", color: "hover:border-purple-500" },
+                    { id: "in_discussion", label: "In Discussion", color: "hover:border-amber-500" },
+                    { id: "callback", label: "Callback", color: "hover:border-cyan-500" },
+                    { id: "converted", label: "Converted", color: "hover:border-green-500" },
+                    { id: "not_interested", label: "Not Interested", color: "hover:border-zinc-500" },
+                  ].map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => handleDrawerStatusChange(s.id)}
+                      className={`rounded-lg border p-2 text-center text-[11px] font-bold transition ${
+                        leadStatus === s.id
+                          ? "border-emerald-500 bg-emerald-500/20 text-emerald-300"
+                          : "border-emerald-950/60 bg-black/40 text-zinc-400 " + s.color
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Direct Contact Links */}
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-emerald-950/60">
+                  <a
+                    href={waUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center justify-center gap-1.5 rounded-lg bg-emerald-500 py-2 text-xs font-bold text-black hover:bg-emerald-400 transition"
+                  >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    <span>WhatsApp Chat</span>
+                  </a>
+
+                  <a
+                    href={`tel:${detail.phone_country_code || "+91"}${detail.phone_number}`}
+                    className="flex items-center justify-center gap-1.5 rounded-lg border border-emerald-900/60 bg-emerald-950/30 py-2 text-xs font-bold text-emerald-300 hover:bg-emerald-900/60 transition"
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                    <span>Call Number</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* ID & Phone Info */}
               <div className="rounded-xl border border-emerald-950/70 bg-black/40 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-zinc-400">Registration ID</span>
@@ -1189,7 +2167,7 @@ function RegistrationDetailDrawer({
                 </div>
                 <div className="font-mono text-xs text-zinc-300 break-all">{detail.id}</div>
 
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-emerald-950/60">
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-emerald-950/60">
                   <div>
                     <span className="text-[11px] text-zinc-500">Mobile Phone</span>
                     <p className="text-sm font-semibold text-white">
@@ -1202,6 +2180,58 @@ function RegistrationDetailDrawer({
                       {detail.device_availability || "N/A"}
                     </p>
                   </div>
+                  <div>
+                    <span className="text-[11px] text-zinc-500">Gender</span>
+                    <p className="text-sm font-semibold text-white">
+                      {detail.gender || "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* CRM Follow-up Notes Box */}
+              <div className="rounded-xl border border-emerald-950/70 bg-black/40 p-4 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>Admin Follow-Up Notes & History</span>
+                </h4>
+
+                <form onSubmit={handleAddNote} className="space-y-2">
+                  <textarea
+                    rows={2}
+                    value={noteInput}
+                    onChange={(e) => setNoteInput(e.target.value)}
+                    placeholder="Type follow-up note (e.g. called customer, joining live batch on Saturday)..."
+                    className="w-full rounded-lg border border-emerald-950/80 bg-black/70 p-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={savingNote || !noteInput.trim()}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-emerald-500 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 transition disabled:opacity-40"
+                  >
+                    <Send className="h-3 w-3" />
+                    <span>{savingNote ? "Saving Note..." : "Save Note to Database"}</span>
+                  </button>
+                </form>
+
+                {/* Notes Timeline */}
+                <div className="space-y-2 pt-2 border-t border-emerald-950/60 max-h-48 overflow-y-auto">
+                  {detail.notesTimeline && detail.notesTimeline.length > 0 ? (
+                    detail.notesTimeline.map((n: any) => (
+                      <div key={n.id} className="rounded-lg border border-emerald-950/60 bg-emerald-950/15 p-2.5 text-xs">
+                        <p className="text-zinc-200">{n.note}</p>
+                        <p className="mt-1 text-[10px] text-zinc-500">
+                          {new Date(n.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                    ))
+                  ) : detail.admin_notes ? (
+                    <div className="rounded-lg border border-emerald-950/60 bg-emerald-950/15 p-2.5 text-xs text-zinc-200">
+                      {detail.admin_notes}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-500">No notes recorded yet for this lead.</p>
+                  )}
                 </div>
               </div>
 
@@ -1231,9 +2261,8 @@ function RegistrationDetailDrawer({
                           {Math.floor(vp.last_position_seconds / 60)}m {Math.floor(vp.last_position_seconds % 60)}s
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-400">Last Synced:</span>
-                        <span className="text-zinc-400">{new Date(vp.updated_at).toLocaleString()}</span>
+                      <div className="text-[10px] text-zinc-500">
+                        Last Synced: {new Date(vp.updated_at).toLocaleString()}
                       </div>
                     </div>
                   ))
@@ -1281,28 +2310,6 @@ function RegistrationDetailDrawer({
                   <p className="text-xs text-zinc-500">No orders initiated by this visitor yet.</p>
                 )}
               </div>
-
-              {/* Event Activity Log */}
-              <div className="rounded-xl border border-emerald-950/70 bg-black/40 p-4 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                  Funnel Activity Trail
-                </h4>
-                {detail.funnel_events?.length > 0 ? (
-                  <div className="space-y-2 border-l border-emerald-950/80 pl-3">
-                    {detail.funnel_events.map((ev: any) => (
-                      <div key={ev.id} className="relative text-xs">
-                        <div className="absolute -left-[17px] top-1 h-2 w-2 rounded-full bg-emerald-500" />
-                        <span className="font-semibold text-zinc-200 uppercase">{ev.event_name.replace(/_/g, " ")}</span>
-                        <div className="text-[10px] text-zinc-500">
-                          {new Date(ev.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-zinc-500">No additional event logs recorded.</p>
-                )}
-              </div>
             </>
           )}
         </div>
@@ -1327,7 +2334,7 @@ function AdminOrdersTab({
   const [status, setStatus] = useState<"all" | "captured" | "pending" | "failed">("all");
   const [selectedOption, setSelectedOption] = useState<"all" | "live" | "recorded">("all");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(15);
   const [data, setData] = useState<any>({ items: [], total: 0, totalPages: 1 });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
