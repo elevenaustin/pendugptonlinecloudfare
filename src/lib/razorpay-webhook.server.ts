@@ -100,11 +100,12 @@ export async function handleRazorpayWebhook(request: Request): Promise<Response>
       }
 
       // Check if order already recorded by paymentId
-      const { data: existingPayment } = await supabaseAdmin
+      const { data: existingPaymentList } = await supabaseAdmin
         .from("orders")
         .select("id, payment_status")
-        .eq("razorpay_payment_id", paymentId)
-        .maybeSingle();
+        .eq("razorpay_payment_id", paymentId);
+
+      const existingPayment = existingPaymentList?.[0];
 
       if (existingPayment?.id) {
         // Idempotency: already marked as captured
@@ -117,11 +118,12 @@ export async function handleRazorpayWebhook(request: Request): Promise<Response>
       // Check if pending order by order_id exists
       let updated = false;
       if (orderId) {
-        const { data: existingOrder } = await supabaseAdmin
+        const { data: existingOrderList } = await supabaseAdmin
           .from("orders")
           .select("id")
-          .eq("razorpay_order_id", orderId)
-          .maybeSingle();
+          .eq("razorpay_order_id", orderId);
+
+        const existingOrder = existingOrderList?.[0];
 
         if (existingOrder?.id) {
           await supabaseAdmin

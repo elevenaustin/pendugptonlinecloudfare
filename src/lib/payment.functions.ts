@@ -228,13 +228,20 @@ export const recordPayment = createServerFn({ method: "POST" })
       }
 
       // 4. Update or Insert into public.orders table with captured status (UPSERT / FALLBACK)
-      const { data: existingPayment } = await supabaseAdmin
+      const { data: existingPaymentList } = await supabaseAdmin
         .from("orders")
         .select("id")
-        .eq("razorpay_payment_id", data.paymentId)
-        .maybeSingle();
+        .eq("razorpay_payment_id", data.paymentId);
+
+      const existingPayment = existingPaymentList?.[0];
 
       if (existingPayment?.id) {
+        // If duplicates exist, clean them up
+        if (existingPaymentList.length > 1) {
+          const extraIds = existingPaymentList.slice(1).map((r) => r.id);
+          await supabaseAdmin.from("orders").delete().in("id", extraIds);
+        }
+
         // Update existing row
         await supabaseAdmin
           .from("orders")
@@ -250,11 +257,12 @@ export const recordPayment = createServerFn({ method: "POST" })
         // Check if pending order with order_id exists
         let updatedOrder = false;
         if (data.orderId) {
-          const { data: matchedByOrder } = await supabaseAdmin
+          const { data: matchedByOrderList } = await supabaseAdmin
             .from("orders")
             .select("id")
-            .eq("razorpay_order_id", data.orderId)
-            .maybeSingle();
+            .eq("razorpay_order_id", data.orderId);
+
+          const matchedByOrder = matchedByOrderList?.[0];
 
           if (matchedByOrder?.id) {
             await supabaseAdmin
@@ -353,107 +361,64 @@ export const syncRazorpayPayments = createServerFn({ method: "POST" })
       const secretKey =
         process.env.RAZORPAY_KEY_SECRET || "1ofBzwOCAqLPn7M6iQG616hx";
 
-      const auth = Buffer.from(`${keyId}:${secretKey}`).toString("base64");
-      const res = await fetch("https://api.razorpay.com/v1/payments?count=50", {
-        headers: { Authorization: `Basic ${auth}` },
-      });
+      // Fetch existing landing page orders that need reconciliation
+      const { data: existingOrders, error: fetchErr } = await supabaseAdmin
+        .from("orders")
+        .select("id, registration_id, selected_option, amount, razorpay_order_id, razorpay_payment_id, payment_status")
+        .not("registration_id", "is", null);
 
-      if (!res.ok) {
-        throw new Error("Failed to fetch payments from Razorpay API");
+      if (fetchErr) {
+        throw new Error(fetchErr.message);
       }
 
-      const rzpData = (await res.json()) as any;
-      const items = (rzpData.items || []).filter(
-        (p: any) => p.status === "captured" || p.status === "authorized",
-      );
-
       let syncedCount = 0;
-      let newCount = 0;
+      let updatedCount = 0;
 
-      for (const p of items) {
+      for (const order of existingOrders || []) {
         syncedCount++;
-        const paymentId = p.id;
-        const amountRupees = Number(p.amount) / 100;
-        const contact = p.contact ? p.contact.replace(/\D/g, "") : "";
-        const desc = (p.description || "").toLowerCase();
-
-        let track: "live" | "recorded" = "recorded";
-        if (amountRupees > 3000 || desc.includes("live") || desc.includes("option 1")) {
-          track = "live";
-        }
-
-        // Check if already in orders table
-        const { data: existing } = await supabaseAdmin
-          .from("orders")
-          .select("id, registration_id")
-          .eq("razorpay_payment_id", paymentId)
-          .maybeSingle();
-
-        // Match registration by phone
-        let regId: string | null = existing?.registration_id || null;
-        if (!regId && contact.length >= 6) {
-          const { data: matchedReg } = await supabaseAdmin
-            .from("registrations")
-            .select("id")
-            .ilike("phone_number", `%${contact.slice(-10)}%`)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (matchedReg?.id) {
-            regId = matchedReg.id;
-          }
-        }
-
-        const createdAtIso = new Date(p.created_at * 1000).toISOString();
-
-        if (existing?.id) {
-          if (!existing.registration_id && regId) {
-            await supabaseAdmin
-              .from("orders")
-              .update({ registration_id: regId })
-              .eq("id", existing.id);
-          }
-        } else {
-          newCount++;
-          await supabaseAdmin.from("orders").insert({
-            registration_id: regId,
-            selected_option: track,
-            amount: amountRupees,
-            currency: p.currency || "INR",
-            razorpay_order_id: p.order_id || null,
-            razorpay_payment_id: paymentId,
-            payment_status: "captured",
-            created_at: createdAtIso,
-            updated_at: new Date().toISOString(),
-          });
-        }
-
-        // Update lead status to converted
-        if (regId) {
+        // If order has a razorpay_payment_id and is not captured, verify status with Razorpay
+        if (order.razorpay_payment_id && order.payment_status !== "captured") {
           try {
-            await supabaseAdmin
-              .from("registrations")
-              .update({
-                lead_status: "converted",
-                is_read: true,
-              })
-              .eq("id", regId);
-          } catch {
-            /* column fallback */
-          }
+            const apiRes = await fetch(
+              `https://api.razorpay.com/v1/payments/${encodeURIComponent(order.razorpay_payment_id)}`,
+              {
+                headers: { Authorization: `Basic ${auth}` },
+              },
+            );
 
-          await supabaseAdmin.from("funnel_events").insert({
-            registration_id: regId,
-            event_name: `payment_captured_${track}`,
-          });
+            if (apiRes.ok) {
+              const pData = (await apiRes.json()) as any;
+              if (pData.status === "captured") {
+                await supabaseAdmin
+                  .from("orders")
+                  .update({
+                    payment_status: "captured",
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", order.id);
+
+                if (order.registration_id) {
+                  await supabaseAdmin
+                    .from("registrations")
+                    .update({
+                      lead_status: "converted",
+                      is_read: true,
+                    })
+                    .eq("id", order.registration_id);
+                }
+                updatedCount++;
+              }
+            }
+          } catch (syncErr) {
+            console.warn("Order reconciliation notice:", syncErr);
+          }
         }
       }
 
       return {
         ok: true,
         syncedCount,
-        newCount,
+        newCount: updatedCount,
       };
     } catch (err: any) {
       console.error("Razorpay sync error:", err);

@@ -574,7 +574,7 @@ function AdminOverviewTab({
   };
 
   useEffect(() => {
-    fetchOverview(true);
+    fetchOverview(false);
   }, [authToken]);
 
   if (loading) {
@@ -2391,7 +2391,7 @@ function AdminOrdersTab({
   };
 
   useEffect(() => {
-    fetchOrders(true);
+    fetchOrders(false);
   }, [authToken, search, status, selectedOption, page, pageSize]);
 
   const handleExportOrders = async () => {
