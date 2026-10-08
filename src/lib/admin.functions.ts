@@ -839,13 +839,117 @@ export const getAdminRegistrationDetail = createServerFn({ method: "POST" })
 /**
  * Server function to generate clean CSV exports for registrations / leads (ADMIN ONLY).
  */
+
+export const exportFiltersSchema = z.object({
+  authToken: z.string().min(1, "Authentication token is required"),
+  search: z.string().optional(),
+  readStatus: z.string().optional(),
+  leadStatus: z.string().optional(),
+  funnelStage: z.string().optional(),
+  selectedOption: z.string().optional(),
+  device: z.string().optional(),
+  gender: z.string().optional(),
+  countryCode: z.string().optional(),
+  datePeriod: z.string().optional(),
+  selectedIds: z.array(z.string()).optional(),
+});
+
+/**
+ * Shared filtering logic for registrations table and all export formats
+ */
+export function filterEnrichedRegistrations(allEnrichedItems: any[], filters: any): any[] {
+  return allEnrichedItems.filter((item) => {
+    // 0. Selected IDs filter (if specific rows checked)
+    if (Array.isArray(filters.selectedIds) && filters.selectedIds.length > 0) {
+      if (!filters.selectedIds.includes(item.id)) return false;
+    }
+
+    // 1. Search filter
+    if (filters.search?.trim()) {
+      const s = filters.search.trim().toLowerCase();
+      const sDigits = s.replace(/\D/g, "");
+      const matchPhone = sDigits.length > 0 && item.phoneNumber.includes(sDigits);
+      const matchFull = item.fullPhone.toLowerCase().includes(s);
+      const matchId = item.id.toLowerCase().includes(s);
+      const matchNotes = (item.adminNotes || "").toLowerCase().includes(s);
+      if (!matchPhone && !matchFull && !matchId && !matchNotes) return false;
+    }
+
+    // 2. Read / Unread filter
+    if (filters.readStatus === "unread" && item.isRead) return false;
+    if (filters.readStatus === "read" && !item.isRead) return false;
+
+    // 3. Lead status filter
+    if (filters.leadStatus && filters.leadStatus !== "all" && item.leadStatus !== filters.leadStatus) return false;
+
+    // 4. Funnel stage filter
+    if (filters.funnelStage && filters.funnelStage !== "all" && item.funnelStage !== filters.funnelStage) return false;
+
+    // 5. Selected option filter
+    if (filters.selectedOption && filters.selectedOption !== "all") {
+      if (filters.selectedOption === "none" && item.selectedOption !== "—") return false;
+      if (filters.selectedOption !== "none" && item.selectedOption !== filters.selectedOption) return false;
+    }
+
+    // 6. Device filter
+    if (filters.device && filters.device !== "all") {
+      const dev = item.deviceAvailability.toLowerCase();
+      if (filters.device === "laptop" && !dev.includes("laptop") && !dev.includes("desktop") && !dev.includes("pc")) {
+        return false;
+      }
+      if (filters.device === "mobile" && (dev.includes("laptop") || dev.includes("desktop") || dev.includes("pc"))) {
+        return false;
+      }
+    }
+
+    // 7. Gender filter
+    if (filters.gender && filters.gender !== "all") {
+      const g = item.gender.toLowerCase();
+      if (filters.gender === "male" && !g.includes("male")) return false;
+      if (filters.gender === "female" && !g.includes("female")) return false;
+      if (filters.gender === "unspecified" && g !== "—" && !g.includes("other") && !g.includes("prefer")) {
+        return false;
+      }
+    }
+
+    // 8. Country code filter
+    if (filters.countryCode && filters.countryCode !== "all") {
+      const isIndia = item.phoneCountryCode === "+91" || item.phoneCountryCode === "91";
+      if (filters.countryCode === "india" && !isIndia) return false;
+      if (filters.countryCode === "international" && isIndia) return false;
+    }
+
+    // 9. Date period filter
+    if (filters.datePeriod && filters.datePeriod !== "all") {
+      const now = new Date();
+      const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const startOfYesterday = new Date(startOfToday.getTime() - 24 * 60 * 60 * 1000);
+      const startOf7Days = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      const startOf30Days = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+      if (filters.datePeriod === "today" && item.createdAtDate < startOfToday) return false;
+      if (
+        filters.datePeriod === "yesterday" &&
+        (item.createdAtDate < startOfYesterday || item.createdAtDate >= startOfToday)
+      ) {
+        return false;
+      }
+      if (filters.datePeriod === "last_7_days" && item.createdAtDate < startOf7Days) return false;
+      if (filters.datePeriod === "last_30_days" && item.createdAtDate < startOf30Days) return false;
+    }
+
+    return true;
+  });
+}
+
+/**
+ * Server function to generate filtered CSV exports with full lead, progress, and order metadata.
+ */
 export const exportRegistrationsCsvData = createServerFn({ method: "POST" })
-  .validator((data: unknown) => authHeaderSchema.parse(data))
+  .validator((data: unknown) => exportFiltersSchema.parse(data))
   .handler(async ({ data }) => {
     try {
-      // 1. Verify admin authorization
       await assertAdminAuth(data.authToken);
-
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
       const { data: rows, error } = await supabaseAdmin
@@ -863,226 +967,275 @@ export const exportRegistrationsCsvData = createServerFn({ method: "POST" })
           funnel_events(id, event_name, created_at)
         `,
         )
-        .order("created_at", { ascending: false })
-        .limit(2000);
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
 
+      // Enrich all rows
+      const allEnrichedItems = (rows || []).map((r: any) => {
+        const crm = parseLeadCRM(r);
+        return {
+          id: r.id,
+          phoneCountryCode: r.phone_country_code || "+91",
+          phoneNumber: r.phone_number,
+          fullPhone: `${r.phone_country_code || "+91"} ${r.phone_number}`,
+          gender: r.gender || "Unspecified",
+          deviceAvailability: r.device_availability || "—",
+          createdAt: r.created_at,
+          createdAtDate: new Date(r.created_at),
+          isRead: crm.isRead,
+          leadStatus: crm.leadStatus,
+          adminNotes: crm.adminNotes,
+          lastContactedAt: crm.lastContactedAt,
+          funnelStage: crm.funnelStage,
+          videoProgressSeconds: crm.videoProgressSeconds,
+          videoCompleted: crm.videoCompleted,
+          selectedOption: crm.latestOrder?.selected_option || "—",
+          paymentStatus: crm.latestOrder?.payment_status || "—",
+          amount: crm.latestOrder?.amount || "",
+          razorpayPaymentId: crm.latestOrder?.razorpay_payment_id || "",
+        };
+      });
+
+      // Apply active filters
+      const filtered = filterEnrichedRegistrations(allEnrichedItems, data);
+
       const headers = [
         "Registration ID",
-        "Country Code",
+        "Registered Date & Time (IST)",
+        "ISO Timestamp (UTC)",
         "Phone Number",
-        "Full Phone",
+        "Clean Phone (10 Digits)",
+        "International Phone",
         "Lead Status",
         "Read Status",
         "Gender",
-        "Device",
-        "Video Watched (Sec)",
-        "Video Completed",
+        "Laptop / PC Availability",
+        "Video Watch Seconds",
+        "Video Watch Minutes",
+        "Video Completed (100%)",
         "Funnel Stage",
-        "Selected Option",
+        "Selected Course Option",
         "Payment Status",
-        "Amount (INR)",
-        "Transaction ID",
+        "Amount Paid (INR)",
+        "Razorpay Transaction ID",
         "Admin Notes",
-        "Last Contacted Date",
-        "Registered Date",
+        "Last Contacted Date (IST)",
       ];
 
-      const csvRows = (rows || []).map((r: any) => {
-        const crm = parseLeadCRM(r);
-        const ord = Array.isArray(r.orders) ? r.orders[0] : r.orders;
+      const csvRows = filtered.map((item) => {
+        const cleanPhone = (item.phoneNumber || "").replace(/\D/g, "");
+        const intlPhone = cleanPhone.startsWith("91") && cleanPhone.length === 12 ? `+${cleanPhone}` : `+91${cleanPhone.slice(-10)}`;
+        const istDate = new Date(item.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        const lastContactedIST = item.lastContactedAt ? new Date(item.lastContactedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "";
+        const minutesWatched = (item.videoProgressSeconds / 60).toFixed(1);
+
         return [
-          `"${r.id}"`,
-          `"${r.phone_country_code || "+91"}"`,
-          `"${r.phone_number}"`,
-          `"${r.phone_country_code || "+91"} ${r.phone_number}"`,
-          `"${crm.leadStatus.toUpperCase()}"`,
-          crm.isRead ? "READ" : "UNREAD",
-          `"${r.gender || ""}"`,
-          `"${r.device_availability || ""}"`,
-          crm.videoProgressSeconds,
-          crm.videoCompleted ? "YES" : "NO",
-          `"${crm.funnelStage.toUpperCase()}"`,
-          `"${ord?.selected_option || ""}"`,
-          `"${ord?.payment_status || ""}"`,
-          ord?.amount || "",
-          `"${ord?.razorpay_payment_id || ""}"`,
-          `"${(crm.adminNotes || "").replace(/"/g, '""')}"`,
-          `"${crm.lastContactedAt ? new Date(crm.lastContactedAt).toISOString() : ""}"`,
-          `"${new Date(r.created_at).toISOString()}"`,
+          `"${item.id}"`,
+          `"${istDate}"`,
+          `"${item.createdAt}"`,
+          `"${item.phoneNumber}"`,
+          `"${cleanPhone.slice(-10)}"`,
+          `"${intlPhone}"`,
+          `"${item.leadStatus.toUpperCase()}"`,
+          item.isRead ? "READ" : "UNREAD",
+          `"${item.gender}"`,
+          `"${item.deviceAvailability.replace(/"/g, '""')}"`,
+          item.videoProgressSeconds,
+          `"${minutesWatched}m"`,
+          item.videoCompleted ? "YES" : "NO",
+          `"${item.funnelStage.toUpperCase()}"`,
+          `"${item.selectedOption}"`,
+          `"${item.paymentStatus}"`,
+          item.amount || "",
+          `"${item.razorpayPaymentId}"`,
+          `"${(item.adminNotes || "").replace(/"/g, '""')}"`,
+          `"${lastContactedIST}"`,
         ].join(",");
       });
 
-      const csvContent = [headers.join(","), ...csvRows].join("\n");
-      return { ok: true, csvContent, filename: `pendugpt_leads_${Date.now()}.csv` };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  });
-
-/**
- * Server function to generate clean CSV exports for verified orders (ADMIN ONLY).
- */
-export const exportOrdersCsvData = createServerFn({ method: "POST" })
-  .validator((data: unknown) => authHeaderSchema.parse(data))
-  .handler(async ({ data }) => {
-    try {
-      // 1. Verify admin authorization
-      await assertAdminAuth(data.authToken);
-
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-      const { data: rows, error } = await supabaseAdmin
-        .from("orders")
-        .select(
-          `
-          id,
-          registration_id,
-          selected_option,
-          amount,
-          currency,
-          razorpay_order_id,
-          razorpay_payment_id,
-          payment_status,
-          created_at,
-          registrations(phone_country_code, phone_number)
-        `,
-        )
-        .order("created_at", { ascending: false })
-        .limit(2000);
-
-      if (error) throw error;
-
-      const headers = [
-        "Order ID",
-        "Registration ID",
-        "Customer Phone",
-        "Course Track",
-        "Amount",
-        "Currency",
-        "Razorpay Order ID",
-        "Razorpay Payment ID",
-        "Payment Status",
-        "Created Date",
-      ];
-
-      const csvRows = (rows || []).map((o: any) => {
-        const reg = Array.isArray(o.registrations) ? o.registrations[0] : o.registrations;
-        return [
-          `"${o.id}"`,
-          `"${o.registration_id || ""}"`,
-          `"${reg ? `${reg.phone_country_code || "+91"} ${reg.phone_number}` : ""}"`,
-          `"${o.selected_option}"`,
-          o.amount,
-          `"${o.currency || "INR"}"`,
-          `"${o.razorpay_order_id || ""}"`,
-          `"${o.razorpay_payment_id || ""}"`,
-          `"${o.payment_status || ""}"`,
-          `"${new Date(o.created_at).toISOString()}"`,
-        ].join(",");
-      });
-
-      const csvContent = [headers.join(","), ...csvRows].join("\n");
-      return { ok: true, csvContent, filename: `pendugpt_orders_${Date.now()}.csv` };
-    } catch (err: any) {
-      return { ok: false, error: err.message };
-    }
-  });
-
-/**
- * Server function to reconcile and sync all live captured payments from Razorpay (ADMIN ONLY).
- */
-export const syncRazorpayPayments = createServerFn({ method: "POST" })
-  .validator((data: unknown) =>
-    z
-      .object({
-        authToken: z.string().min(1, "Authentication token is required"),
-      })
-      .parse(data),
-  )
-  .handler(async ({ data }) => {
-    try {
-      await assertAdminAuth(data.authToken);
-
-      const { siteConfig } = await import("@/config/site");
-      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-
-      const keyId =
-        process.env.RAZORPAY_KEY_ID ||
-        process.env.VITE_RAZORPAY_KEY_ID ||
-        siteConfig.razorpay.keyId;
-      const secretKey =
-        process.env.RAZORPAY_KEY_SECRET || "1ofBzwOCAqLPn7M6iQG616hx";
-
-      // Fetch existing landing page orders that need reconciliation
-      const { data: existingOrders, error: fetchErr } = await supabaseAdmin
-        .from("orders")
-        .select("id, registration_id, selected_option, amount, razorpay_order_id, razorpay_payment_id, payment_status")
-        .not("registration_id", "is", null);
-
-      if (fetchErr) {
-        throw new Error(fetchErr.message);
-      }
-
-      let syncedCount = 0;
-      let updatedCount = 0;
-
-      for (const order of existingOrders || []) {
-        syncedCount++;
-        // If order has a razorpay_payment_id and is not captured, verify status with Razorpay
-        if (order.razorpay_payment_id && order.payment_status !== "captured") {
-          try {
-            const apiRes = await fetch(
-              `https://api.razorpay.com/v1/payments/${encodeURIComponent(order.razorpay_payment_id)}`,
-              {
-                headers: { Authorization: `Basic ${auth}` },
-              },
-            );
-
-            if (apiRes.ok) {
-              const pData = (await apiRes.json()) as any;
-              if (pData.status === "captured") {
-                await supabaseAdmin
-                  .from("orders")
-                  .update({
-                    payment_status: "captured",
-                    updated_at: new Date().toISOString(),
-                  })
-                  .eq("id", order.id);
-
-                if (order.registration_id) {
-                  await supabaseAdmin
-                    .from("registrations")
-                    .update({
-                      lead_status: "converted",
-                      is_read: true,
-                    })
-                    .eq("id", order.registration_id);
-                }
-                updatedCount++;
-              }
-            }
-          } catch (syncErr) {
-            console.warn("Order reconciliation notice:", syncErr);
-          }
-        }
-      }
+      // UTF-8 BOM for flawless Excel & Google Sheets compatibility
+      const csvContent = "\uFEFF" + [headers.join(","), ...csvRows].join("\n");
+      const filename = `pendugpt_leads_filtered_${filtered.length}_${new Date().toISOString().slice(0, 10)}.csv`;
 
       return {
         ok: true,
-        syncedCount,
-        newCount: updatedCount,
+        csvContent,
+        filename,
+        count: filtered.length,
       };
     } catch (err: any) {
-      console.error("Razorpay sync error:", err);
-      return {
-        ok: false,
-        error: err.message || "Failed to sync Razorpay payments",
-      };
+      return { ok: false, error: err.message };
     }
   });
 
+/**
+ * Server function to export ONLY contacts / phone numbers for WhatsApp & CRM broadcast (ADMIN ONLY).
+ */
+export const exportContactsOnlyCsvData = createServerFn({ method: "POST" })
+  .validator((data: unknown) => exportFiltersSchema.parse(data))
+  .handler(async ({ data }) => {
+    try {
+      await assertAdminAuth(data.authToken);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const { data: rows, error } = await supabaseAdmin
+        .from("registrations")
+        .select(
+          `
+          id,
+          phone_country_code,
+          phone_number,
+          gender,
+          device_availability,
+          created_at,
+          video_progress(last_position_seconds, completion_status),
+          orders(selected_option, amount, payment_status, razorpay_payment_id),
+          funnel_events(id, event_name, created_at)
+        `,
+        )
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const allEnrichedItems = (rows || []).map((r: any) => {
+        const crm = parseLeadCRM(r);
+        return {
+          id: r.id,
+          phoneCountryCode: r.phone_country_code || "+91",
+          phoneNumber: r.phone_number,
+          fullPhone: `${r.phone_country_code || "+91"} ${r.phone_number}`,
+          gender: r.gender || "Unspecified",
+          deviceAvailability: r.device_availability || "—",
+          createdAt: r.created_at,
+          createdAtDate: new Date(r.created_at),
+          isRead: crm.isRead,
+          leadStatus: crm.leadStatus,
+          adminNotes: crm.adminNotes,
+          funnelStage: crm.funnelStage,
+          videoProgressSeconds: crm.videoProgressSeconds,
+          videoCompleted: crm.videoCompleted,
+          selectedOption: crm.latestOrder?.selected_option || "—",
+        };
+      });
+
+      const filtered = filterEnrichedRegistrations(allEnrichedItems, data);
+
+      const headers = [
+        "Phone Number",
+        "Clean Phone (10 digits)",
+        "International Phone (+91)",
+        "Gender",
+        "Laptop / PC",
+        "Video Watch Progress",
+        "Video Completed",
+        "Lead Status",
+        "Registered Date (IST)",
+      ];
+
+      const csvRows = filtered.map((item) => {
+        const cleanPhone = (item.phoneNumber || "").replace(/\D/g, "");
+        const intlPhone = cleanPhone.startsWith("91") && cleanPhone.length === 12 ? `+${cleanPhone}` : `+91${cleanPhone.slice(-10)}`;
+        const istDate = new Date(item.createdAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        const watchLabel = item.videoCompleted ? "100% Completed" : `${(item.videoProgressSeconds / 60).toFixed(1)}m watched`;
+
+        return [
+          `"${item.phoneNumber}"`,
+          `"${cleanPhone.slice(-10)}"`,
+          `"${intlPhone}"`,
+          `"${item.gender}"`,
+          `"${item.deviceAvailability.replace(/"/g, '""')}"`,
+          `"${watchLabel}"`,
+          item.videoCompleted ? "YES" : "NO",
+          `"${item.leadStatus.toUpperCase()}"`,
+          `"${istDate}"`,
+        ].join(",");
+      });
+
+      const csvContent = "\uFEFF" + [headers.join(","), ...csvRows].join("\n");
+      const filename = `pendugpt_contacts_filtered_${filtered.length}_${new Date().toISOString().slice(0, 10)}.csv`;
+
+      return {
+        ok: true,
+        csvContent,
+        filename,
+        count: filtered.length,
+      };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+/**
+ * Server function to export plain TXT phone numbers for filtered leads (ADMIN ONLY).
+ */
+export const exportPhoneNumbersTxtData = createServerFn({ method: "POST" })
+  .validator((data: unknown) => exportFiltersSchema.parse(data))
+  .handler(async ({ data }) => {
+    try {
+      await assertAdminAuth(data.authToken);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const { data: rows, error } = await supabaseAdmin
+        .from("registrations")
+        .select(
+          `
+          id,
+          phone_country_code,
+          phone_number,
+          gender,
+          device_availability,
+          created_at,
+          video_progress(last_position_seconds, completion_status),
+          orders(selected_option, amount, payment_status, razorpay_payment_id),
+          funnel_events(id, event_name, created_at)
+        `,
+        )
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const allEnrichedItems = (rows || []).map((r: any) => {
+        const crm = parseLeadCRM(r);
+        return {
+          id: r.id,
+          phoneCountryCode: r.phone_country_code || "+91",
+          phoneNumber: r.phone_number,
+          fullPhone: `${r.phone_country_code || "+91"} ${r.phone_number}`,
+          gender: r.gender || "Unspecified",
+          deviceAvailability: r.device_availability || "—",
+          createdAt: r.created_at,
+          createdAtDate: new Date(r.created_at),
+          isRead: crm.isRead,
+          leadStatus: crm.leadStatus,
+          adminNotes: crm.adminNotes,
+          funnelStage: crm.funnelStage,
+          videoProgressSeconds: crm.videoProgressSeconds,
+          videoCompleted: crm.videoCompleted,
+          selectedOption: crm.latestOrder?.selected_option || "—",
+        };
+      });
+
+      const filtered = filterEnrichedRegistrations(allEnrichedItems, data);
+
+      const phones = Array.from(
+        new Set(
+          filtered
+            .map((item) => (item.phoneNumber || "").replace(/\D/g, "").slice(-10))
+            .filter((p: string) => p.length >= 10)
+        )
+      );
+
+      return {
+        ok: true,
+        txtContent: phones.join("\n"),
+        filename: `pendugpt_phones_filtered_${phones.length}_${new Date().toISOString().slice(0, 10)}.txt`,
+        count: phones.length,
+      };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
 
 
 /**
@@ -1158,7 +1311,7 @@ export const syncRegistrationsToSupabaseLeads = createServerFn({ method: "POST" 
         syncedCount,
         failedCount,
         totalCount: formattedLeads.length,
-        message: `Synced ${syncedCount} leads to Supabase successfully!`,
+        message: `Synced ${syncedCount} of ${formattedLeads.length} leads to Supabase successfully!`,
       };
     } catch (err: any) {
       return { ok: false, error: err.message };
@@ -1166,76 +1319,142 @@ export const syncRegistrationsToSupabaseLeads = createServerFn({ method: "POST" 
   });
 
 /**
- * Server function to export ONLY contacts / phone numbers for WhatsApp & CRM broadcast (ADMIN ONLY).
+ * Server function to trigger Razorpay live payment reconciliation (ADMIN ONLY).
  */
-export const exportContactsOnlyCsvData = createServerFn({ method: "POST" })
+export const syncRazorpayPayments = createServerFn({ method: "POST" })
   .validator((data: unknown) => authHeaderSchema.parse(data))
   .handler(async ({ data }) => {
     try {
       await assertAdminAuth(data.authToken);
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-      const { data: rows, error } = await supabaseAdmin
-        .from("registrations")
-        .select("id, phone_country_code, phone_number, gender, device_availability, created_at, video_progress(last_position_seconds, completion_status)")
-        .order("created_at", { ascending: false });
+      const keyId = process.env.RAZORPAY_KEY_ID || process.env.VITE_RAZORPAY_KEY_ID;
+      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+      if (!keyId || !keySecret) {
+        return {
+          ok: true,
+          syncedCount: 0,
+          newCount: 0,
+          message: "Razorpay keys not configured on server",
+        };
+      }
+
+      const auth = Buffer.from(`${keyId}:${keySecret}`).toString("base64");
+      const { data: existingOrders, error } = await supabaseAdmin
+        .from("orders")
+        .select("id, registration_id, razorpay_payment_id, payment_status")
+        .order("created_at", { ascending: false })
+        .limit(100);
 
       if (error) throw error;
 
-      const headers = ["Phone Number", "Clean Phone (10 digits)", "International Phone", "Gender", "Device", "Watch Status", "Registered Date"];
-      const csvRows = (rows || []).map((r: any) => {
-        const vid = Array.isArray(r.video_progress) ? r.video_progress[0] : r.video_progress;
-        const isCompleted = Boolean(vid?.completion_status) || (Number(vid?.last_position_seconds) >= 815);
-        const cleanPhone = (r.phone_number || "").replace(/\D/g, "");
-        const intlPhone = cleanPhone.startsWith("91") && cleanPhone.length === 12 ? `+${cleanPhone}` : `+91${cleanPhone.slice(-10)}`;
-        return [
-          `"${r.phone_number}"`,
-          `"${cleanPhone.slice(-10)}"`,
-          `"${intlPhone}"`,
-          `"${r.gender || ""}"`,
-          `"${r.device_availability || ""}"`,
-          isCompleted ? "Completed (100%)" : `${Number(vid?.last_position_seconds) || 0}s watched`,
-          `"${new Date(r.created_at).toLocaleString("en-IN")}"`,
-        ].join(",");
-      });
+      let syncedCount = 0;
+      let updatedCount = 0;
 
-      const csvContent = [headers.join(","), ...csvRows].join("\n");
-      return { ok: true, csvContent, filename: `pendugpt_contacts_only_${Date.now()}.csv` };
+      for (const order of existingOrders || []) {
+        syncedCount++;
+        if (order.razorpay_payment_id && order.payment_status !== "captured") {
+          try {
+            const apiRes = await fetch(
+              `https://api.razorpay.com/v1/payments/${encodeURIComponent(order.razorpay_payment_id)}`,
+              {
+                headers: { Authorization: `Basic ${auth}` },
+              },
+            );
+
+            if (apiRes.ok) {
+              const pData = (await apiRes.json()) as any;
+              if (pData.status === "captured") {
+                await supabaseAdmin
+                  .from("orders")
+                  .update({
+                    payment_status: "captured",
+                    updated_at: new Date().toISOString(),
+                  })
+                  .eq("id", order.id);
+
+                if (order.registration_id) {
+                  await supabaseAdmin
+                    .from("registrations")
+                    .update({
+                      lead_status: "converted",
+                      is_read: true,
+                    })
+                    .eq("id", order.registration_id);
+                }
+                updatedCount++;
+              }
+            }
+          } catch (syncErr) {
+            console.warn("Order reconciliation notice:", syncErr);
+          }
+        }
+      }
+
+      return {
+        ok: true,
+        syncedCount,
+        newCount: updatedCount,
+      };
     } catch (err: any) {
-      return { ok: false, error: err.message };
+      console.error("Razorpay sync error:", err);
+      return {
+        ok: false,
+        error: err.message || "Failed to sync Razorpay payments",
+      };
     }
   });
 
 /**
- * Server function to export plain TXT phone numbers (ADMIN ONLY).
+ * Server function to generate clean CSV exports for verified orders (ADMIN ONLY).
  */
-export const exportPhoneNumbersTxtData = createServerFn({ method: "POST" })
+export const exportOrdersCsvData = createServerFn({ method: "POST" })
   .validator((data: unknown) => authHeaderSchema.parse(data))
   .handler(async ({ data }) => {
     try {
       await assertAdminAuth(data.authToken);
       const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
-      const { data: rows, error } = await supabaseAdmin
-        .from("registrations")
-        .select("phone_number")
+      const { data: orders, error } = await supabaseAdmin
+        .from("orders")
+        .select("id, amount, currency, selected_option, payment_status, razorpay_order_id, razorpay_payment_id, created_at, registrations(phone_country_code, phone_number, gender)")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
 
-      const phones = Array.from(
-        new Set(
-          (rows || [])
-            .map((r: any) => (r.phone_number || "").replace(/\D/g, ""))
-            .filter((p: string) => p.length >= 10)
-        )
-      );
+      const headers = [
+        "Order ID",
+        "Phone Number",
+        "Amount (INR)",
+        "Currency",
+        "Course Option",
+        "Payment Status",
+        "Razorpay Payment ID",
+        "Created At (IST)",
+      ];
 
+      const rows = (orders || []).map((o: any) => {
+        const reg = o.registrations;
+        const phone = reg ? `${reg.phone_country_code || "+91"} ${reg.phone_number || ""}` : "—";
+        const ist = new Date(o.created_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        return [
+          `"${o.id}"`,
+          `"${phone}"`,
+          o.amount || 0,
+          `"${o.currency || "INR"}"`,
+          `"${o.selected_option || ""}"`,
+          `"${o.payment_status || ""}"`,
+          `"${o.razorpay_payment_id || ""}"`,
+          `"${ist}"`,
+        ].join(",");
+      });
+
+      const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
       return {
         ok: true,
-        txtContent: phones.join("\n"),
-        filename: `pendugpt_phone_numbers_${Date.now()}.txt`,
-        count: phones.length,
+        csvContent,
+        filename: `pendugpt_orders_${Date.now()}.csv`,
       };
     } catch (err: any) {
       return { ok: false, error: err.message };

@@ -1187,55 +1187,101 @@ function AdminRegistrationsTab({
     }
   };
 
-  // Export Full CSV
-  const handleExportCsv = async () => {
+
+  // Helper to compile current active filter payload for exports
+  const getExportFilterPayload = (useSelectedOnly = false) => {
+    let effectiveReadStatus = readStatus;
+    let effectiveLeadStatus = leadStatus;
+    let effectiveFunnelStage = funnelStage;
+
+    if (quickTab === "unread") effectiveReadStatus = "unread";
+    if (quickTab === "followed_up") effectiveLeadStatus = "followed_up";
+    if (quickTab === "in_discussion") effectiveLeadStatus = "in_discussion";
+    if (quickTab === "converted") effectiveLeadStatus = "converted";
+    if (quickTab === "paid") effectiveFunnelStage = "paid";
+
+    return {
+      authToken,
+      search: search.trim() || undefined,
+      readStatus: effectiveReadStatus,
+      leadStatus: effectiveLeadStatus,
+      funnelStage: effectiveFunnelStage,
+      selectedOption,
+      device,
+      gender,
+      countryCode,
+      datePeriod,
+      selectedIds: useSelectedOnly && selectedLeadIds.length > 0 ? selectedLeadIds : undefined,
+    };
+  };
+
+  // Export Full CSV (Strictly Filtered)
+  const handleExportCsv = async (useSelectedOnly = false) => {
     try {
       setExporting(true);
       setExportDropdownOpen(false);
+      const filterPayload = getExportFilterPayload(useSelectedOnly);
       const res = await (exportRegistrationsCsvData as any)({
-        data: { authToken },
+        data: filterPayload,
       });
       if (res && res.ok) {
         downloadBlobFile(res.csvContent, "text/csv;charset=utf-8;", res.filename);
+        setCopyFeedbackToast(`📊 Downloaded full CSV (${res.count} filtered leads)`);
+        setTimeout(() => setCopyFeedbackToast(null), 4000);
+      } else {
+        alert(res?.error || "Failed to export CSV.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Export error:", err);
+      alert(err.message || "Failed to export CSV.");
     } finally {
       setExporting(false);
     }
   };
 
-  // Export Contacts Only CSV
-  const handleExportContactsOnly = async () => {
+  // Export Contacts Only CSV (Strictly Filtered)
+  const handleExportContactsOnly = async (useSelectedOnly = false) => {
     try {
       setExporting(true);
       setExportDropdownOpen(false);
+      const filterPayload = getExportFilterPayload(useSelectedOnly);
       const res = await (exportContactsOnlyCsvData as any)({
-        data: { authToken },
+        data: filterPayload,
       });
       if (res && res.ok) {
         downloadBlobFile(res.csvContent, "text/csv;charset=utf-8;", res.filename);
+        setCopyFeedbackToast(`📱 Downloaded contacts CSV (${res.count} contacts)`);
+        setTimeout(() => setCopyFeedbackToast(null), 4000);
+      } else {
+        alert(res?.error || "Failed to export contacts.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Export contacts error:", err);
+      alert(err.message || "Failed to export contacts.");
     } finally {
       setExporting(false);
     }
   };
 
-  // Export Phone Numbers TXT
-  const handleExportPhoneTxt = async () => {
+  // Export Phone Numbers TXT (Strictly Filtered)
+  const handleExportPhoneTxt = async (useSelectedOnly = false) => {
     try {
       setExporting(true);
       setExportDropdownOpen(false);
+      const filterPayload = getExportFilterPayload(useSelectedOnly);
       const res = await (exportPhoneNumbersTxtData as any)({
-        data: { authToken },
+        data: filterPayload,
       });
       if (res && res.ok) {
         downloadBlobFile(res.txtContent, "text/plain;charset=utf-8;", res.filename);
+        setCopyFeedbackToast(`📄 Downloaded TXT list (${res.count} phone numbers)`);
+        setTimeout(() => setCopyFeedbackToast(null), 4000);
+      } else {
+        alert(res?.error || "Failed to export phone TXT.");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Export txt error:", err);
+      alert(err.message || "Failed to export TXT.");
     } finally {
       setExporting(false);
     }
@@ -1246,12 +1292,12 @@ function AdminRegistrationsTab({
     const phones = Array.from(
       new Set(
         itemsToCopy
-          .map((i: any) => (i.phone_number || "").replace(/\D/g, ""))
+          .map((i: any) => (i.phone_number || i.phoneNumber || "").replace(/\D/g, "").slice(-10))
           .filter((p: string) => p.length >= 10)
       )
     );
     if (phones.length === 0) {
-      alert("No phone numbers to copy.");
+      alert("No phone numbers available to copy.");
       return;
     }
     navigator.clipboard.writeText(phones.join("\n"));
@@ -1561,54 +1607,83 @@ function AdminRegistrationsTab({
               </button>
 
               {exportDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-emerald-950/80 bg-[#040d08]/95 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.8)] backdrop-blur-xl z-50 animate-in fade-in zoom-in-95 space-y-1">
-                  <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-zinc-500 border-b border-emerald-950/60">
-                    Export Options (Total: {counts.total || 0} leads)
+                <div className="absolute right-0 mt-2 w-80 rounded-2xl border border-emerald-950/80 bg-[#040d08]/98 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.9)] backdrop-blur-2xl z-50 animate-in fade-in zoom-in-95 space-y-1">
+                  <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 border-b border-emerald-950/60 flex items-center justify-between">
+                    <span>Export Filtered ({data.total || 0} Leads)</span>
+                    {activeFilterCount > 0 && (
+                      <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[9px] font-bold text-emerald-300">
+                        {activeFilterCount} Active Filters
+                      </span>
+                    )}
                   </div>
 
                   <button
-                    onClick={handleExportCsv}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                    onClick={() => handleExportCsv(false)}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/60 hover:text-white transition-colors"
                   >
                     <FileText className="h-4 w-4 text-emerald-400 shrink-0" />
                     <div>
-                      <div>Export Full Data (CSV)</div>
-                      <div className="text-[10px] text-zinc-400 font-normal">All 18+ registration & order fields</div>
+                      <div>Export Filtered Full Data (CSV)</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">All 20+ columns matching your active filters</div>
                     </div>
                   </button>
 
                   <button
-                    onClick={handleExportContactsOnly}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                    onClick={() => handleExportContactsOnly(false)}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/60 hover:text-white transition-colors"
                   >
                     <Phone className="h-4 w-4 text-sky-400 shrink-0" />
                     <div>
-                      <div>Export Only Contacts (CSV)</div>
-                      <div className="text-[10px] text-zinc-400 font-normal">Formatted for WhatsApp CRM / Broadcasts</div>
+                      <div>Export Filtered Contacts Only (CSV)</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">Clean phones for WhatsApp Broadcast / WACRM</div>
                     </div>
                   </button>
 
                   <button
-                    onClick={handleExportPhoneTxt}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                    onClick={() => handleExportPhoneTxt(false)}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/60 hover:text-white transition-colors"
                   >
                     <FileText className="h-4 w-4 text-amber-400 shrink-0" />
                     <div>
                       <div>Export Phone Numbers (TXT)</div>
-                      <div className="text-[10px] text-zinc-400 font-normal">1 number per line for bulk messaging</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">1 number per line for bulk messaging tools</div>
                     </div>
                   </button>
 
                   <button
-                    onClick={() => handleCopyPhoneNumbers(data.items, "Current Page Leads")}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                    onClick={() => handleCopyPhoneNumbers(data.items, "Current Page")}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/60 hover:text-white transition-colors"
                   >
                     <Copy className="h-4 w-4 text-purple-400 shrink-0" />
                     <div>
-                      <div>Copy Phone Numbers</div>
-                      <div className="text-[10px] text-zinc-400 font-normal">Direct copy to clipboard</div>
+                      <div>Copy Filtered Phone Numbers</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">Copy numbers directly to clipboard</div>
                     </div>
                   </button>
+
+                  {selectedLeadIds.length > 0 && (
+                    <>
+                      <div className="mt-2 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-primary border-t border-emerald-950/60">
+                        Export Checked Rows ({selectedLeadIds.length} leads)
+                      </div>
+
+                      <button
+                        onClick={() => handleExportCsv(true)}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-primary hover:bg-emerald-950/60 transition-colors"
+                      >
+                        <FileText className="h-4 w-4 text-primary shrink-0" />
+                        <div>Export Selected Full CSV ({selectedLeadIds.length})</div>
+                      </button>
+
+                      <button
+                        onClick={() => handleExportContactsOnly(true)}
+                        className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-primary hover:bg-emerald-950/60 transition-colors"
+                      >
+                        <Phone className="h-4 w-4 text-primary shrink-0" />
+                        <div>Export Selected Contacts ({selectedLeadIds.length})</div>
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>
