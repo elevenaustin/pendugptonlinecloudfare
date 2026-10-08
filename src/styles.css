@@ -89,17 +89,12 @@
     -ms-text-size-adjust: 100%;
     text-size-adjust: 100%;
     overscroll-behavior-y: none;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   body {
     background-color: var(--color-background);
-    background-image: 
-      radial-gradient(at 0% 0%, rgba(0, 240, 118, 0.07) 0px, transparent 45%),
-      radial-gradient(at 100% 20%, rgba(0, 214, 104, 0.05) 0px, transparent 40%),
-      radial-gradient(at 50% 100%, rgba(0, 240, 118, 0.06) 0px, transparent 50%),
-      linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
-    background-size: 100% 100%, 100% 100%, 100% 100%, 48px 48px, 48px 48px;
-    background-attachment: fixed;
+    position: relative;
     color: var(--color-foreground);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
@@ -107,7 +102,29 @@
     overflow-x: hidden;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
+    -webkit-overflow-scrolling: touch;
     user-select: auto;
+  }
+
+  /* GPU-Accelerated fixed background layer (completely eliminates scroll repaint lag on mobile GPUs) */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(0, 240, 118, 0.07) 0px, transparent 45%),
+      radial-gradient(at 100% 20%, rgba(0, 214, 104, 0.05) 0px, transparent 40%),
+      radial-gradient(at 50% 100%, rgba(0, 240, 118, 0.06) 0px, transparent 50%),
+      linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 100% 100%, 48px 48px, 48px 48px;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    will-change: transform;
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
   }
 
   button, a {
@@ -351,10 +368,26 @@
   animation: greenDotPulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+@keyframes soundPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 20px rgba(0, 240, 118, 0.4);
+  }
+  50% {
+    transform: scale(1.04);
+    box-shadow: 0 0 35px rgba(0, 240, 118, 0.75);
+  }
+}
+
+@utility animate-sound-pulse {
+  animation: soundPulse 1.6s ease-in-out infinite;
+}
+
 @utility animate-marquee {
   display: flex;
   width: max-content;
   animation: marqueeLeft 32s linear infinite;
+  will-change: transform;
 }
 
 .animate-marquee:hover {

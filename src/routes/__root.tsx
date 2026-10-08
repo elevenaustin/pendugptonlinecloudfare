@@ -11,7 +11,6 @@ import {
 import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
 import { InAppBrowserBanner } from "@/components/common/InAppBrowserBanner";
 
 function NotFoundComponent() {
@@ -40,7 +39,7 @@ function ErrorComponent({ error, reset }: ErrorComponentProps) {
   console.error(error);
   const router = useRouter();
   useEffect(() => {
-    reportLovableError(error, { boundary: "tanstack_root_error_component" });
+    console.error("Application error boundary:", error);
   }, [error]);
 
   return (
@@ -83,6 +82,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         content:
           "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover",
       },
+      { name: "format-detection", content: "telephone=no" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
       { title: "PenduGPT™ — AI Website Masterclass" },
       {
         name: "description",
@@ -101,6 +104,15 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     links: [
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      { rel: "preconnect", href: "https://player.vimeo.com" },
+      { rel: "preconnect", href: "https://f.vimeocdn.com", crossOrigin: "anonymous" },
+      { rel: "preconnect", href: "https://i.vimeocdn.com", crossOrigin: "anonymous" },
+      { rel: "preconnect", href: "https://vod-progressive.akamaized.net" },
+      { rel: "dns-prefetch", href: "https://player.vimeo.com" },
+      { rel: "dns-prefetch", href: "https://f.vimeocdn.com" },
+      { rel: "dns-prefetch", href: "https://i.vimeocdn.com" },
+      { rel: "dns-prefetch", href: "https://vod-progressive.akamaized.net" },
+      { rel: "dns-prefetch", href: "https://skyfire.vimeocdn.com" },
       {
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,600;1,700;1,800;1,900&display=swap",

@@ -21,7 +21,7 @@ const faqs = [
   },
   {
     q: "Which tools will I learn?",
-    a: "You will learn modern AI website builders and prompting tools such as ChatGPT, Claude, Lovable, Bolt, and Cursor.",
+    a: "You will learn modern AI website builders and prompting tools such as ChatGPT, Claude, v0, Bolt, and Cursor.",
   },
   {
     q: "What is included in the ₹997 masterclass?",

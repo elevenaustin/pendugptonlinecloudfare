@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import Player from "@vimeo/player";
 import {
   ArrowRight,
   CheckCircle2,
   Clock,
+  Loader2,
   Lock,
   Maximize,
   Minimize,
@@ -46,7 +47,9 @@ export function TrainingScreen() {
   const [progress, setProgress] = useState(0);
   const [isCompleted, setIsCompleted] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [hasStarted, setHasStarted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const hideControlsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -187,7 +190,39 @@ export function TrainingScreen() {
     track("video_complete");
   };
 
-  // Initialize Vimeo Player with hidden default controls & auto-resume where left off
+  const unmuteAudio = useCallback(async () => {
+    if (!playerRef.current) return;
+    try {
+      await playerRef.current.setMuted(false);
+      await playerRef.current.setVolume(1);
+      setIsMuted(false);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Global interaction listener: unmute audio on first user touch/click/key anywhere
+  useEffect(() => {
+    if (!isAuthorized) return;
+
+    const handleFirstUserInteraction = () => {
+      unmuteAudio();
+    };
+
+    window.addEventListener("pointerdown", handleFirstUserInteraction, { passive: true, once: true });
+    window.addEventListener("touchstart", handleFirstUserInteraction, { passive: true, once: true });
+    window.addEventListener("click", handleFirstUserInteraction, { passive: true, once: true });
+    window.addEventListener("keydown", handleFirstUserInteraction, { passive: true, once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", handleFirstUserInteraction);
+      window.removeEventListener("touchstart", handleFirstUserInteraction);
+      window.removeEventListener("click", handleFirstUserInteraction);
+      window.removeEventListener("keydown", handleFirstUserInteraction);
+    };
+  }, [isAuthorized, unmuteAudio]);
+
+  // Initialize Vimeo Player with instant autoplay & auto-resume where left off
   useEffect(() => {
     if (!isAuthorized) return;
     const iframe = iframeRef.current;
@@ -201,27 +236,65 @@ export function TrainingScreen() {
         try {
           const duration = await player.getDuration();
           durationRef.current = duration;
-          const muted = await player.getMuted();
-          setIsMuted(muted);
 
           // Resume video from the exact timestamp where the user left off
           const resumeTime = lastPositionRef.current || watchedRef.current;
           if (resumeTime > 1 && resumeTime < duration) {
             await player.setCurrentTime(resumeTime);
           }
+
+          // Start instant playback (< 1 second)
+          try {
+            await player.play();
+            setIsPlaying(true);
+            setIsBuffering(false);
+            setHasStarted(true);
+          } catch {
+            /* browser may queue play */
+          }
+
+          // Attempt initial unmuted audio; if blocked, remain muted with audio cue
+          try {
+            await player.setMuted(false);
+            await player.setVolume(1);
+            setIsMuted(false);
+          } catch {
+            setIsMuted(true);
+          }
         } catch {
           /* ignore */
         }
       });
 
-      player.on("play", () => {
+      player.on("play", async () => {
         setIsPlaying(true);
+        setIsBuffering(false);
+        setHasStarted(true);
         triggerControlsAutoHide();
         track("video_start");
       });
 
+      player.on("playing", () => {
+        setIsPlaying(true);
+        setIsBuffering(false);
+        setHasStarted(true);
+      });
+
+      player.on("bufferstart", () => {
+        setIsBuffering(true);
+      });
+
+      player.on("bufferend", () => {
+        setIsBuffering(false);
+      });
+
+      player.on("waiting", () => {
+        setIsBuffering(true);
+      });
+
       player.on("pause", async () => {
         setIsPlaying(false);
+        setIsBuffering(false);
         setShowControls(true);
         if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
         try {
@@ -235,6 +308,8 @@ export function TrainingScreen() {
       player.on("timeupdate", (data: { seconds: number; percent: number; duration: number }) => {
         durationRef.current = data.duration || durationRef.current;
         lastPositionRef.current = data.seconds;
+        setIsBuffering(false);
+        setHasStarted(true);
 
         // Anti-skip protection: If time jumps ahead of max watched, snap back immediately!
         if (data.seconds > watchedRef.current + 2) {
@@ -271,6 +346,7 @@ export function TrainingScreen() {
 
       player.on("ended", () => {
         setIsPlaying(false);
+        setIsBuffering(false);
         setShowControls(true);
         handleCompletion();
       });
@@ -313,14 +389,15 @@ export function TrainingScreen() {
         try {
           await playerRef.current.play();
           setIsPlaying(true);
+          setIsBuffering(false);
+          setHasStarted(true);
           triggerControlsAutoHide();
         } catch {
-          // If browser blocks unmuted play on mobile, mute and play
           try {
             await playerRef.current.setMuted(true);
-            setIsMuted(true);
             await playerRef.current.play();
             setIsPlaying(true);
+            setIsMuted(true);
             triggerControlsAutoHide();
           } catch {
             /* ignore */
@@ -341,6 +418,24 @@ export function TrainingScreen() {
     }
   };
 
+  const toggleMute = async () => {
+    handleUserActivity();
+    if (!playerRef.current) return;
+    try {
+      const muted = await playerRef.current.getMuted();
+      if (muted) {
+        await playerRef.current.setMuted(false);
+        await playerRef.current.setVolume(1);
+        setIsMuted(false);
+      } else {
+        await playerRef.current.setMuted(true);
+        setIsMuted(true);
+      }
+    } catch {
+      /* fallback */
+    }
+  };
+
   const handleRewind10 = async () => {
     handleUserActivity();
     if (!playerRef.current) return;
@@ -350,18 +445,6 @@ export function TrainingScreen() {
       lastPositionRef.current = newTime;
       await playerRef.current.setCurrentTime(newTime);
       persist(progress, isCompleted, newTime);
-    } catch {
-      /* fallback */
-    }
-  };
-
-  const toggleMute = async () => {
-    handleUserActivity();
-    if (!playerRef.current) return;
-    try {
-      const muted = await playerRef.current.getMuted();
-      await playerRef.current.setMuted(!muted);
-      setIsMuted(!muted);
     } catch {
       /* fallback */
     }
@@ -459,28 +542,62 @@ export function TrainingScreen() {
                 isFullscreen ? "h-full max-h-screen rounded-none" : "rounded-xl sm:rounded-2xl"
               }`}
             >
-              {/* Vimeo Iframe with Hidden Native Controls */}
+              {/* Vimeo Iframe with Instant Autoplay & Low-Bandwidth Adaptive Stream */}
               <iframe
                 ref={iframeRef}
-                src={`https://player.vimeo.com/video/${vimeoId}?controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1`}
+                src={`https://player.vimeo.com/video/${vimeoId}?autoplay=1&muted=1&playsinline=1&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&quality=auto&transparent=0&preload=auto`}
                 className="absolute inset-0 h-full w-full border-0 pointer-events-none"
-                allow="autoplay; fullscreen; picture-in-picture"
+                loading="eager"
+                allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
                 title="PenduGPT AI Website Training Video"
               />
 
-              {/* Clickable Backdrop to Toggle Play/Pause */}
+              {/* Clickable Backdrop to Toggle Play/Pause & Unmute on Tap */}
               <button
-                onClick={togglePlay}
+                onClick={() => {
+                  if (isMuted) unmuteAudio();
+                  togglePlay();
+                }}
                 className="absolute inset-0 h-full w-full cursor-pointer z-10 bg-transparent"
                 aria-label={isPlaying ? "Pause video" : "Play video"}
               />
+
+              {/* Floating "Tap for Audio / Sound" Pill When Video Is Playing Muted */}
+              {isPlaying && isMuted && (
+                <div className="pointer-events-none absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-30 animate-reveal">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      unmuteAudio();
+                    }}
+                    className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/90 border border-[#00F076] text-white px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-bold shadow-[0_0_25px_rgba(0,240,118,0.6)] animate-sound-pulse backdrop-blur-md cursor-pointer hover:bg-black active:scale-95 transition-transform"
+                  >
+                    <VolumeX className="h-4 w-4 text-[#00F076]" />
+                    <span>🔊 Tap for Audio / Sound</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Buffering Spinner Overlay */}
+              {isBuffering && (
+                <div className="pointer-events-none absolute inset-0 z-25 flex items-center justify-center bg-black/30 backdrop-blur-[2px] transition-opacity">
+                  <div className="flex items-center gap-2.5 rounded-full bg-black/85 border border-[#00F076]/40 px-4 py-2 text-xs font-semibold text-[#00F076] shadow-xl">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#00F076]" />
+                    <span>Optimizing stream...</span>
+                  </div>
+                </div>
+              )}
 
               {/* Center Big Play Button when Paused */}
               {!isPlaying && (
                 <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/40 backdrop-blur-xs transition-opacity animate-reveal">
                   <button
                     type="button"
-                    onClick={togglePlay}
+                    onClick={() => {
+                      if (isMuted) unmuteAudio();
+                      togglePlay();
+                    }}
                     className="pointer-events-auto grid h-16 w-16 xs:h-20 xs:w-20 sm:h-24 sm:w-24 place-items-center rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black shadow-[0_0_40px_rgba(0,240,118,0.85)] transition-all hover:scale-110 active:scale-95 cursor-pointer"
                     aria-label="Play video"
                   >
@@ -542,16 +659,18 @@ export function TrainingScreen() {
                       type="button"
                       onClick={toggleMute}
                       className="flex items-center gap-1 sm:gap-1.5 rounded-full bg-black/75 hover:bg-black text-white px-3 py-2 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
+                      title={isMuted ? "Unmute Sound" : "Mute Sound"}
+                      aria-label={isMuted ? "Unmute Sound" : "Mute Sound"}
                     >
                       {isMuted ? (
                         <>
-                          <VolumeX className="h-4 w-4 text-amber-400" />
-                          <span>Unmute</span>
+                          <VolumeX className="h-4 w-4 text-[#00F076]" />
+                          <span className="hidden xs:inline">Unmute</span>
                         </>
                       ) : (
                         <>
                           <Volume2 className="h-4 w-4 text-[#00F076]" />
-                          <span>Mute</span>
+                          <span className="hidden xs:inline">Mute</span>
                         </>
                       )}
                     </button>

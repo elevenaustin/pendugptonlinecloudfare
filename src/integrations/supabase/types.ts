@@ -1,8 +1,6 @@
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
     PostgrestVersion: "14.18";
   };
@@ -10,31 +8,190 @@ export type Database = {
     Tables: {
       leads: {
         Row: {
-          consent: boolean;
-          created_at: string;
-          email: string | null;
-          full_name: string;
           id: string;
-          interest: string;
-          whatsapp: string;
+          created_at: string;
+          phone: string;
+          gender: string | null;
+          has_laptop: string | null;
+          watch_seconds: number | null;
+          unlocked_class: boolean;
+          whatsapp_followup_status: string;
+          whatsapp_followup_sent_at: string | null;
+          whatsapp_last_reply_at: string | null;
+          video_completed_at: string | null;
+          user_agent: string | null;
+          consent?: boolean;
+          email?: string | null;
+          full_name?: string | null;
+          interest?: string | null;
+          whatsapp?: string | null;
         };
         Insert: {
-          consent?: boolean;
-          created_at?: string;
-          email?: string | null;
-          full_name: string;
           id?: string;
-          interest: string;
-          whatsapp: string;
+          created_at?: string;
+          phone: string;
+          gender?: string | null;
+          has_laptop?: string | null;
+          watch_seconds?: number | null;
+          unlocked_class?: boolean;
+          whatsapp_followup_status?: string;
+          whatsapp_followup_sent_at?: string | null;
+          whatsapp_last_reply_at?: string | null;
+          video_completed_at?: string | null;
+          user_agent?: string | null;
+          consent?: boolean;
+          email?: string | null;
+          full_name?: string | null;
+          interest?: string | null;
+          whatsapp?: string | null;
         };
         Update: {
-          consent?: boolean;
-          created_at?: string;
-          email?: string | null;
-          full_name?: string;
           id?: string;
-          interest?: string;
-          whatsapp?: string;
+          created_at?: string;
+          phone?: string;
+          gender?: string | null;
+          has_laptop?: string | null;
+          watch_seconds?: number | null;
+          unlocked_class?: boolean;
+          whatsapp_followup_status?: string;
+          whatsapp_followup_sent_at?: string | null;
+          whatsapp_last_reply_at?: string | null;
+          video_completed_at?: string | null;
+          user_agent?: string | null;
+          consent?: boolean;
+          email?: string | null;
+          full_name?: string | null;
+          interest?: string | null;
+          whatsapp?: string | null;
+        };
+        Relationships: [];
+      };
+      registrations: {
+        Row: {
+          id: string;
+          created_at: string;
+          phone_country_code: string;
+          phone_number: string;
+          gender: string | null;
+          device_availability: string | null;
+          is_read: boolean;
+          lead_status: string;
+          admin_notes: string | null;
+          last_contacted_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          created_at?: string;
+          phone_country_code?: string;
+          phone_number: string;
+          gender?: string | null;
+          device_availability?: string | null;
+          is_read?: boolean;
+          lead_status?: string;
+          admin_notes?: string | null;
+          last_contacted_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          created_at?: string;
+          phone_country_code?: string;
+          phone_number?: string;
+          gender?: string | null;
+          device_availability?: string | null;
+          is_read?: boolean;
+          lead_status?: string;
+          admin_notes?: string | null;
+          last_contacted_at?: string | null;
+        };
+        Relationships: [];
+      };
+      orders: {
+        Row: {
+          id: string;
+          registration_id: string | null;
+          selected_option: string;
+          amount: number;
+          currency: string;
+          razorpay_order_id: string | null;
+          razorpay_payment_id: string | null;
+          payment_status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          registration_id?: string | null;
+          selected_option: string;
+          amount: number;
+          currency?: string;
+          razorpay_order_id?: string | null;
+          razorpay_payment_id?: string | null;
+          payment_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          registration_id?: string | null;
+          selected_option?: string;
+          amount?: number;
+          currency?: string;
+          razorpay_order_id?: string | null;
+          razorpay_payment_id?: string | null;
+          payment_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      video_progress: {
+        Row: {
+          id: string;
+          registration_id: string;
+          video_id: string;
+          last_position_seconds: number;
+          completion_status: boolean;
+          video_completed_at: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          registration_id: string;
+          video_id: string;
+          last_position_seconds?: number;
+          completion_status?: boolean;
+          video_completed_at?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          registration_id?: string;
+          video_id?: string;
+          last_position_seconds?: number;
+          completion_status?: boolean;
+          video_completed_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      funnel_events: {
+        Row: {
+          id: string;
+          registration_id: string | null;
+          event_name: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          registration_id?: string | null;
+          event_name: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          registration_id?: string | null;
+          event_name?: string;
+          created_at?: string;
         };
         Relationships: [];
       };

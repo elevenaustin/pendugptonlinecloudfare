@@ -10,8 +10,12 @@ import {
   syncRazorpayPayments,
   exportRegistrationsCsvData,
   exportOrdersCsvData,
+  syncRegistrationsToSupabaseLeads,
+  exportContactsOnlyCsvData,
+  exportPhoneNumbersTxtData,
 } from "@/lib/admin.functions";
 import {
+  UploadCloud,
   Users,
   PlayCircle,
   Video,
@@ -54,6 +58,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 
+const ADMIN_PASSCODES = ["PenduGPT2026", "PenduGPT26430", "pendugpt2026", "pendugpt26430"];
 const ADMIN_PASSCODE = "PenduGPT2026";
 const PASSCODE_STORAGE_KEY = "pendugpt_admin_passcode_auth";
 
@@ -69,7 +74,7 @@ export function AdminDashboard() {
     try {
       const urlParams = new URLSearchParams(window.location.search);
       const urlKey = urlParams.get("key");
-      if (urlKey && (urlKey.trim() === ADMIN_PASSCODE || urlKey.trim().toLowerCase() === "pendugpt2026")) {
+      if (urlKey && (ADMIN_PASSCODES.includes(urlKey.trim()))) {
         localStorage.setItem(PASSCODE_STORAGE_KEY, ADMIN_PASSCODE);
         setSession({
           access_token: ADMIN_PASSCODE,
@@ -85,7 +90,7 @@ export function AdminDashboard() {
     // 2. Check localStorage saved passcode
     try {
       const savedPasscode = localStorage.getItem(PASSCODE_STORAGE_KEY);
-      if (savedPasscode && (savedPasscode === ADMIN_PASSCODE || savedPasscode.toLowerCase() === "pendugpt2026")) {
+      if (savedPasscode && (ADMIN_PASSCODES.includes(savedPasscode))) {
         setSession({
           access_token: ADMIN_PASSCODE,
           user: { email: "master-admin@pendugpt.com" },
@@ -957,6 +962,22 @@ function AdminRegistrationsTab({
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [isSyncingSupabase, setIsSyncingSupabase] = useState(false);
+  const [supabaseSyncMsg, setSupabaseSyncMsg] = useState<string | null>(null);
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [copyFeedbackToast, setCopyFeedbackToast] = useState<string | null>(null);
+  const [copiedRowId, setCopiedRowId] = useState<string | null>(null);
+  const exportDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(event.target as Node)) {
+        setExportDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Fetch leads with active filters
   const fetchRegistrations = async (isSilent = false) => {
@@ -1145,22 +1166,37 @@ function AdminRegistrationsTab({
     );
   };
 
-  // Export CSV
+  // ⚡ Sync All Registrations to Supabase Leads Table
+  const handleSyncToSupabase = async () => {
+    try {
+      setIsSyncingSupabase(true);
+      setSupabaseSyncMsg(null);
+      const res = await (syncRegistrationsToSupabaseLeads as any)({
+        data: { authToken },
+      });
+      if (res && res.ok) {
+        setSupabaseSyncMsg(`✅ ${res.message || "Synced leads to Supabase successfully!"}`);
+      } else {
+        setSupabaseSyncMsg(`❌ Failed to sync: ${res?.error || "Unknown error"}`);
+      }
+    } catch (err: any) {
+      setSupabaseSyncMsg(`❌ Sync error: ${err?.message || "Unknown error"}`);
+    } finally {
+      setIsSyncingSupabase(false);
+      setTimeout(() => setSupabaseSyncMsg(null), 8000);
+    }
+  };
+
+  // Export Full CSV
   const handleExportCsv = async () => {
     try {
       setExporting(true);
+      setExportDropdownOpen(false);
       const res = await (exportRegistrationsCsvData as any)({
         data: { authToken },
       });
       if (res && res.ok) {
-        const blob = new Blob([res.csvContent], { type: "text/csv;charset=utf-8;" });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", res.filename);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        downloadBlobFile(res.csvContent, "text/csv;charset=utf-8;", res.filename);
       }
     } catch (err) {
       console.error("Export error:", err);
@@ -1168,6 +1204,72 @@ function AdminRegistrationsTab({
       setExporting(false);
     }
   };
+
+  // Export Contacts Only CSV
+  const handleExportContactsOnly = async () => {
+    try {
+      setExporting(true);
+      setExportDropdownOpen(false);
+      const res = await (exportContactsOnlyCsvData as any)({
+        data: { authToken },
+      });
+      if (res && res.ok) {
+        downloadBlobFile(res.csvContent, "text/csv;charset=utf-8;", res.filename);
+      }
+    } catch (err) {
+      console.error("Export contacts error:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Export Phone Numbers TXT
+  const handleExportPhoneTxt = async () => {
+    try {
+      setExporting(true);
+      setExportDropdownOpen(false);
+      const res = await (exportPhoneNumbersTxtData as any)({
+        data: { authToken },
+      });
+      if (res && res.ok) {
+        downloadBlobFile(res.txtContent, "text/plain;charset=utf-8;", res.filename);
+      }
+    } catch (err) {
+      console.error("Export txt error:", err);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Copy Phone Numbers to Clipboard
+  const handleCopyPhoneNumbers = (itemsToCopy: any[], label: string) => {
+    const phones = Array.from(
+      new Set(
+        itemsToCopy
+          .map((i: any) => (i.phone_number || "").replace(/\D/g, ""))
+          .filter((p: string) => p.length >= 10)
+      )
+    );
+    if (phones.length === 0) {
+      alert("No phone numbers to copy.");
+      return;
+    }
+    navigator.clipboard.writeText(phones.join("\n"));
+    setCopyFeedbackToast(`📋 Copied ${phones.length} phone numbers (${label}) to clipboard!`);
+    setTimeout(() => setCopyFeedbackToast(null), 4000);
+    setExportDropdownOpen(false);
+  };
+
+  function downloadBlobFile(content: string, type: string, filename: string) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
 
   const handleResetFilters = () => {
     setSearch("");
@@ -1216,6 +1318,19 @@ function AdminRegistrationsTab({
 
   return (
     <div className="space-y-4">
+      {/* Toast Notification */}
+      {copyFeedbackToast && (
+        <div className="fixed bottom-6 right-6 z-50 rounded-2xl border border-emerald-500/50 bg-black/90 px-4 py-3 text-xs font-bold text-emerald-400 shadow-[0_10px_30px_rgba(16,185,129,0.4)] backdrop-blur-xl animate-in slide-in-from-bottom-5">
+          {copyFeedbackToast}
+        </div>
+      )}
+
+      {/* Supabase Sync Feedback Banner */}
+      {supabaseSyncMsg && (
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-950/50 p-4 text-center text-xs font-bold text-emerald-300 backdrop-blur animate-in fade-in">
+          {supabaseSyncMsg}
+        </div>
+      )}
       {/* Top Quick Status Tabs */}
       <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
         <button
@@ -1422,15 +1537,81 @@ function AdminRegistrationsTab({
               <span>Refresh</span>
             </button>
 
-            {/* Export CSV */}
+            {/* ⚡ Sync to Supabase Button */}
             <button
-              onClick={handleExportCsv}
-              disabled={exporting}
-              className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-bold text-black shadow-sm shadow-emerald-500/20 hover:bg-emerald-400 disabled:opacity-50"
+              onClick={handleSyncToSupabase}
+              disabled={isSyncingSupabase}
+              className="flex items-center gap-1.5 rounded-lg border border-emerald-500/60 bg-emerald-500/20 px-3.5 py-2 text-xs font-bold text-emerald-300 shadow-[0_0_15px_rgba(16,185,129,0.3)] hover:bg-emerald-500/30 active:scale-95 transition-all disabled:opacity-50"
+              title="Push all registrations and video watch progress to live Supabase leads table"
             >
-              <Download className="h-3.5 w-3.5" />
-              <span>{exporting ? "Exporting..." : "Export CSV"}</span>
+              <UploadCloud className={`h-4 w-4 text-emerald-400 ${isSyncingSupabase ? "animate-bounce" : ""}`} />
+              <span>{isSyncingSupabase ? "Syncing to Supabase..." : "⚡ Sync to Supabase"}</span>
             </button>
+
+            {/* Export Dropdown Suite */}
+            <div className="relative" ref={exportDropdownRef}>
+              <button
+                onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
+                disabled={exporting}
+                className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-bold text-black shadow-sm shadow-emerald-500/20 hover:bg-emerald-400 disabled:opacity-50"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>{exporting ? "Exporting..." : "Export Leads"}</span>
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-200 ${exportDropdownOpen ? "rotate-180" : ""}`} />
+              </button>
+
+              {exportDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-72 rounded-2xl border border-emerald-950/80 bg-[#040d08]/95 p-2 shadow-[0_10px_40px_rgba(0,0,0,0.8)] backdrop-blur-xl z-50 animate-in fade-in zoom-in-95 space-y-1">
+                  <div className="px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-wider text-zinc-500 border-b border-emerald-950/60">
+                    Export Options (Total: {counts.total || 0} leads)
+                  </div>
+
+                  <button
+                    onClick={handleExportCsv}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                  >
+                    <FileText className="h-4 w-4 text-emerald-400 shrink-0" />
+                    <div>
+                      <div>Export Full Data (CSV)</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">All 18+ registration & order fields</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={handleExportContactsOnly}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                  >
+                    <Phone className="h-4 w-4 text-sky-400 shrink-0" />
+                    <div>
+                      <div>Export Only Contacts (CSV)</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">Formatted for WhatsApp CRM / Broadcasts</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={handleExportPhoneTxt}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                  >
+                    <FileText className="h-4 w-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div>Export Phone Numbers (TXT)</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">1 number per line for bulk messaging</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => handleCopyPhoneNumbers(data.items, "Current Page Leads")}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-bold text-zinc-200 hover:bg-emerald-950/50 hover:text-white transition-colors"
+                  >
+                    <Copy className="h-4 w-4 text-purple-400 shrink-0" />
+                    <div>
+                      <div>Copy Phone Numbers</div>
+                      <div className="text-[10px] text-zinc-400 font-normal">Direct copy to clipboard</div>
+                    </div>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 

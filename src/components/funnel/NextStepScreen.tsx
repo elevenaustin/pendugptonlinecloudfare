@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import Player from "@vimeo/player";
 import {
@@ -16,6 +16,7 @@ import {
   Globe,
   HelpCircle,
   Laptop,
+  Loader2,
   Lock,
   Maximize,
   Minimize,
@@ -64,8 +65,9 @@ export function NextStepScreen() {
   const [selectedTier, setSelectedTier] = useState<CheckoutTier | null>(null);
   const [showPricing, setShowPricing] = useState(true);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
+  const [isBuffering, setIsBuffering] = useState(false);
   const [isEnded, setIsEnded] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
@@ -149,26 +151,29 @@ export function NextStepScreen() {
     }
   };
 
+  const unmuteAudio = useCallback(async () => {
+    if (!playerRef.current) return;
+    try {
+      await playerRef.current.setMuted(false);
+      await playerRef.current.setVolume(1);
+      setIsMuted(false);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   // Global interaction listener: immediately unmutes audio on first user touch/click/scroll anywhere
   useEffect(() => {
     if (!isAuthorized) return;
 
-    const handleFirstUserInteraction = async () => {
-      if (playerRef.current) {
-        try {
-          await playerRef.current.setMuted(false);
-          await playerRef.current.setVolume(1);
-          setIsMuted(false);
-        } catch {
-          /* ignore */
-        }
-      }
+    const handleFirstUserInteraction = () => {
+      unmuteAudio();
     };
 
-    window.addEventListener("pointerdown", handleFirstUserInteraction, { passive: true });
-    window.addEventListener("touchstart", handleFirstUserInteraction, { passive: true });
-    window.addEventListener("click", handleFirstUserInteraction, { passive: true });
-    window.addEventListener("keydown", handleFirstUserInteraction, { passive: true });
+    window.addEventListener("pointerdown", handleFirstUserInteraction, { passive: true, once: true });
+    window.addEventListener("touchstart", handleFirstUserInteraction, { passive: true, once: true });
+    window.addEventListener("click", handleFirstUserInteraction, { passive: true, once: true });
+    window.addEventListener("keydown", handleFirstUserInteraction, { passive: true, once: true });
 
     return () => {
       window.removeEventListener("pointerdown", handleFirstUserInteraction);
@@ -176,9 +181,9 @@ export function NextStepScreen() {
       window.removeEventListener("click", handleFirstUserInteraction);
       window.removeEventListener("keydown", handleFirstUserInteraction);
     };
-  }, [isAuthorized]);
+  }, [isAuthorized, unmuteAudio]);
 
-  // Initialize Vimeo Player with reliable autoplay & controls
+  // Initialize Vimeo Player with reliable instant autoplay & controls
   useEffect(() => {
     if (!isAuthorized) return;
     const iframe = iframeRef.current;
@@ -194,35 +199,25 @@ export function NextStepScreen() {
         try {
           const dur = await playerInstance?.getDuration();
           if (dur) setDuration(dur);
-          
-          // Unmute and set full volume for automatic sound playback
+
+          // Instant playback start
+          try {
+            await playerInstance?.play();
+            setIsPlaying(true);
+            setIsBuffering(false);
+            setIsEnded(false);
+            triggerControlsAutoHide();
+          } catch {
+            /* queued */
+          }
+
+          // Try unmuted audio, fallback to muted with visual cue
           try {
             await playerInstance?.setMuted(false);
             await playerInstance?.setVolume(1);
             setIsMuted(false);
           } catch {
-            /* ignore */
-          }
-
-          // Attempt automatic playback with sound
-          try {
-            await playerInstance?.play();
-            setIsPlaying(true);
-            setIsEnded(false);
-            setIsMuted(false);
-            triggerControlsAutoHide();
-          } catch {
-            // If browser autoplay policy strictly blocks unmuted initial play without gesture, start muted and prompt
-            try {
-              await playerInstance?.setMuted(true);
-              setIsMuted(true);
-              await playerInstance?.play();
-              setIsPlaying(true);
-              setIsEnded(false);
-              triggerControlsAutoHide();
-            } catch {
-              /* ignore */
-            }
+            setIsMuted(true);
           }
         } catch {
           /* ignore */
@@ -231,31 +226,46 @@ export function NextStepScreen() {
 
       playerInstance.on("play", async () => {
         setIsPlaying(true);
+        setIsBuffering(false);
         setIsEnded(false);
         triggerControlsAutoHide();
-        // Ensure volume is 100% on play
-        try {
-          const muted = await playerInstance?.getMuted();
-          setIsMuted(!!muted);
-        } catch {
-          /* ignore */
-        }
+      });
+
+      playerInstance.on("playing", () => {
+        setIsPlaying(true);
+        setIsBuffering(false);
+        setIsEnded(false);
+      });
+
+      playerInstance.on("bufferstart", () => {
+        setIsBuffering(true);
+      });
+
+      playerInstance.on("bufferend", () => {
+        setIsBuffering(false);
+      });
+
+      playerInstance.on("waiting", () => {
+        setIsBuffering(true);
       });
 
       playerInstance.on("pause", () => {
         setIsPlaying(false);
+        setIsBuffering(false);
         setShowControls(true);
         if (hideControlsTimerRef.current) clearTimeout(hideControlsTimerRef.current);
       });
 
       playerInstance.on("timeupdate", (data: { seconds: number; duration: number }) => {
         setCurrentTime(data.seconds);
+        setIsBuffering(false);
         if (data.duration) setDuration(data.duration);
       });
 
       playerInstance.on("ended", () => {
         setIsEnded(true);
         setIsPlaying(false);
+        setIsBuffering(false);
         setShowControls(true);
       });
     } catch (err) {
@@ -288,24 +298,17 @@ export function NextStepScreen() {
       const paused = await player.getPaused();
       if (paused) {
         try {
-          await player.setMuted(false);
-          await player.setVolume(1);
-          setIsMuted(false);
-        } catch {
-          /* ignore */
-        }
-        try {
           await player.play();
           setIsPlaying(true);
+          setIsBuffering(false);
           setIsEnded(false);
           triggerControlsAutoHide();
         } catch {
-          // If browser strictly blocks unmuted play, mute and play
           try {
             await player.setMuted(true);
-            setIsMuted(true);
             await player.play();
             setIsPlaying(true);
+            setIsMuted(true);
             setIsEnded(false);
             triggerControlsAutoHide();
           } catch {
@@ -321,6 +324,24 @@ export function NextStepScreen() {
         } catch {
           /* ignore */
         }
+      }
+    } catch {
+      /* fallback */
+    }
+  };
+
+  const toggleMute = async () => {
+    handleUserActivity();
+    if (!playerRef.current) return;
+    try {
+      const muted = await playerRef.current.getMuted();
+      if (muted) {
+        await playerRef.current.setMuted(false);
+        await playerRef.current.setVolume(1);
+        setIsMuted(false);
+      } else {
+        await playerRef.current.setMuted(true);
+        setIsMuted(true);
       }
     } catch {
       /* fallback */
@@ -354,6 +375,12 @@ export function NextStepScreen() {
       try {
         await player.setCurrentTime(0);
         try {
+          await player.setMuted(false);
+          await player.setVolume(1);
+        } catch {
+          /* ignore */
+        }
+        try {
           await player.play();
           setIsPlaying(true);
           setIsEnded(false);
@@ -361,7 +388,6 @@ export function NextStepScreen() {
         } catch {
           try {
             await player.setMuted(true);
-            setIsMuted(true);
             await player.play();
             setIsPlaying(true);
             setIsEnded(false);
@@ -370,27 +396,6 @@ export function NextStepScreen() {
             /* ignore */
           }
         }
-      } catch {
-        /* ignore */
-      }
-    }
-  };
-
-  const handleToggleMute = async () => {
-    handleUserActivity();
-    if (playerRef.current) {
-      try {
-        const muted = await playerRef.current.getMuted();
-        const nextMuted = !muted;
-        await playerRef.current.setMuted(nextMuted);
-        if (!nextMuted) {
-          try {
-            await playerRef.current.setVolume(1);
-          } catch {
-            /* ignore */
-          }
-        }
-        setIsMuted(nextMuted);
       } catch {
         /* ignore */
       }
@@ -504,30 +509,47 @@ export function NextStepScreen() {
                 >
                   <iframe
                     ref={iframeRef}
-                    src={`https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=0&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&playsinline=1`}
+                    src={`https://player.vimeo.com/video/${nextStepVimeoId}?autoplay=1&muted=1&playsinline=1&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&quality=auto&transparent=0&preload=auto`}
                     className="absolute inset-0 h-full w-full border-0 pointer-events-none"
+                    loading="eager"
                     allow="autoplay; fullscreen; picture-in-picture; encrypted-media; accelerometer; gyroscope"
                     title="PenduGPT Masterclass Action Plan"
                   />
 
-                  {/* Clickable Backdrop to Toggle Play/Pause */}
+                  {/* Clickable Backdrop to Toggle Play/Pause & Unmute on Tap */}
                   <button
-                    onClick={togglePlay}
+                    onClick={() => {
+                      if (isMuted) unmuteAudio();
+                      togglePlay();
+                    }}
                     className="absolute inset-0 h-full w-full cursor-pointer z-10 bg-transparent"
                     aria-label={isPlaying ? "Pause video" : "Play video"}
                   />
 
-                  {/* Floating Unmute Pill if mobile browser started video in muted mode */}
-                  {isPlaying && isMuted && (
-                    <div className="absolute top-3 left-3 sm:top-4 sm:left-4 z-30 animate-bounce">
+                  {/* Floating "Tap for Audio / Sound" Pill When Video Is Playing Muted */}
+                  {isPlaying && isMuted && !isEnded && (
+                    <div className="pointer-events-none absolute top-3 sm:top-4 left-1/2 -translate-x-1/2 z-30 animate-reveal">
                       <button
                         type="button"
-                        onClick={handleToggleMute}
-                        className="flex items-center gap-2 rounded-full bg-gradient-to-r from-[#00F076] via-[#3bf995] to-[#00D668] text-black px-4 py-2 text-xs sm:text-sm font-display font-black uppercase tracking-wider shadow-[0_0_30px_rgba(0,240,118,1)] hover:scale-105 active:scale-95 transition-all cursor-pointer border border-white/60"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          unmuteAudio();
+                        }}
+                        className="pointer-events-auto flex items-center gap-2 rounded-full bg-black/90 border border-[#00F076] text-white px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-bold shadow-[0_0_25px_rgba(0,240,118,0.6)] animate-sound-pulse backdrop-blur-md cursor-pointer hover:bg-black active:scale-95 transition-transform"
                       >
-                        <Volume2 className="h-4 w-4 fill-black stroke-black" />
-                        <span>Tap for Sound 🔊</span>
+                        <VolumeX className="h-4 w-4 text-[#00F076]" />
+                        <span>🔊 Tap for Audio / Sound</span>
                       </button>
+                    </div>
+                  )}
+
+                  {/* Buffering Spinner Overlay */}
+                  {isBuffering && !isEnded && (
+                    <div className="pointer-events-none absolute inset-0 z-25 flex items-center justify-center bg-black/30 backdrop-blur-[2px] transition-opacity">
+                      <div className="flex items-center gap-2.5 rounded-full bg-black/85 border border-[#00F076]/40 px-4 py-2 text-xs font-semibold text-[#00F076] shadow-xl">
+                        <Loader2 className="h-4 w-4 animate-spin text-[#00F076]" />
+                        <span>Optimizing stream...</span>
+                      </div>
                     </div>
                   )}
 
@@ -536,7 +558,10 @@ export function NextStepScreen() {
                     <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/40 backdrop-blur-xs transition-opacity animate-reveal">
                       <button
                         type="button"
-                        onClick={togglePlay}
+                        onClick={() => {
+                          if (isMuted) unmuteAudio();
+                          togglePlay();
+                        }}
                         className="pointer-events-auto grid h-16 w-16 xs:h-20 xs:w-20 sm:h-24 sm:w-24 place-items-center rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] text-black shadow-[0_0_40px_rgba(0,240,118,0.85)] transition-all hover:scale-110 active:scale-95 cursor-pointer"
                         aria-label="Play video"
                       >
@@ -592,6 +617,27 @@ export function NextStepScreen() {
                           <span>-10s</span>
                         </button>
 
+                        {/* Mute / Unmute Button */}
+                        <button
+                          type="button"
+                          onClick={toggleMute}
+                          className="flex items-center gap-1 sm:gap-1.5 rounded-full bg-black/75 hover:bg-black text-white px-3 py-2 sm:px-3.5 sm:py-2 text-xs sm:text-sm font-semibold backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
+                          title={isMuted ? "Unmute Sound" : "Mute Sound"}
+                          aria-label={isMuted ? "Unmute Sound" : "Mute Sound"}
+                        >
+                          {isMuted ? (
+                            <>
+                              <VolumeX className="h-4 w-4 text-[#00F076]" />
+                              <span className="hidden xs:inline">Unmute</span>
+                            </>
+                          ) : (
+                            <>
+                              <Volume2 className="h-4 w-4 text-[#00F076]" />
+                              <span className="hidden xs:inline">Mute</span>
+                            </>
+                          )}
+                        </button>
+
                         {/* Time display */}
                         {duration > 0 && (
                           <span className="text-[10px] sm:text-xs text-white/80 font-mono pl-1 hidden xs:inline">
@@ -601,21 +647,6 @@ export function NextStepScreen() {
                       </div>
 
                       <div className="flex items-center gap-2">
-                        {/* Mute/Unmute */}
-                        <button
-                          type="button"
-                          onClick={handleToggleMute}
-                          className="grid h-9 w-9 sm:h-10 sm:w-10 place-items-center rounded-full bg-black/75 hover:bg-black text-white backdrop-blur-md border border-white/20 hover:border-[#00F076]/60 shadow-md transition-all active:scale-95 cursor-pointer"
-                          title={isMuted ? "Unmute" : "Mute"}
-                          aria-label={isMuted ? "Unmute" : "Mute"}
-                        >
-                          {isMuted ? (
-                            <VolumeX className="h-4 w-4 text-amber-400" />
-                          ) : (
-                            <Volume2 className="h-4 w-4 text-[#00F076]" />
-                          )}
-                        </button>
-
                         {/* 1-Click Universal Fullscreen */}
                         <button
                           type="button"

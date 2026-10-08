@@ -89,6 +89,18 @@ export function RegistrationScreen() {
       /* ignore */
     }
     setIsReady(true);
+
+    // Warm-up & prefetch Vimeo video iframe for instant sub-second video startup on next screen
+    try {
+      if (typeof document !== "undefined") {
+        const link = document.createElement("link");
+        link.rel = "prefetch";
+        link.href = `https://player.vimeo.com/video/${siteConfig.video.vimeoId}?autoplay=1&muted=1&playsinline=1&controls=0&badge=0&autopause=0&player_id=0&app_id=58479&title=0&byline=0&portrait=0&sidedock=0&dnt=1&quality=auto&transparent=0&preload=auto`;
+        document.head.appendChild(link);
+      }
+    } catch {
+      /* ignore */
+    }
   }, [navigate]);
 
   const filteredCountries = useMemo(() => {

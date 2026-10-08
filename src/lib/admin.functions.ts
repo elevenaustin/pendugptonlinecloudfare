@@ -1083,3 +1083,161 @@ export const syncRazorpayPayments = createServerFn({ method: "POST" })
     }
   });
 
+
+
+/**
+ * Server function to sync all registrations to the live Supabase Leads database (ADMIN ONLY).
+ */
+export const syncRegistrationsToSupabaseLeads = createServerFn({ method: "POST" })
+  .validator((data: unknown) => authHeaderSchema.parse(data))
+  .handler(async ({ data }) => {
+    try {
+      await assertAdminAuth(data.authToken);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const { data: rows, error } = await supabaseAdmin
+        .from("registrations")
+        .select("id, phone_country_code, phone_number, gender, device_availability, created_at, video_progress(last_position_seconds, completion_status)")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const targetSupabaseUrl = "https://gifxzzrbpukpxsvmhokj.supabase.co";
+      const targetSupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpZnh6enJicHVrcHhzdm1ob2tqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjQ4ODYsImV4cCI6MjEwNjM0MDg4Nn0.__waNLX5psBQoCoU-kpFDxhwG0J0lTrcZQ-GPE0IpEM";
+
+      const formattedLeads = (rows || []).map((r: any) => {
+        const vid = Array.isArray(r.video_progress) ? r.video_progress[0] : r.video_progress;
+        const watchSec = Math.round(Number(vid?.last_position_seconds) || 0);
+        const isCompleted = Boolean(vid?.completion_status) || watchSec >= 815;
+        const cleanPhone = (r.phone_number || "").replace(/\D/g, "");
+        const deviceStr = (r.device_availability || "").toLowerCase();
+        const hasLaptop = deviceStr.includes("yes") ? "yes" : deviceStr.includes("no") ? "no" : "later";
+
+        return {
+          id: r.id || `reg_${cleanPhone}`,
+          created_at: r.created_at || new Date().toISOString(),
+          phone: cleanPhone || r.phone_number,
+          gender: r.gender ? r.gender.toLowerCase() : "unspecified",
+          has_laptop: hasLaptop,
+          watch_seconds: watchSec,
+          unlocked_class: isCompleted,
+          whatsapp_followup_status: "NOT_SENT",
+          video_completed_at: isCompleted ? (r.created_at || new Date().toISOString()) : null,
+          user_agent: `Masterclass CRM Sync | ${r.device_availability || ""}`,
+        };
+      });
+
+      let syncedCount = 0;
+      let failedCount = 0;
+
+      for (let i = 0; i < formattedLeads.length; i += 50) {
+        const batch = formattedLeads.slice(i, i + 50);
+        try {
+          const res = await fetch(`${targetSupabaseUrl}/rest/v1/leads`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              apikey: targetSupabaseAnonKey,
+              Authorization: `Bearer ${targetSupabaseAnonKey}`,
+              Prefer: "resolution=merge-duplicates",
+            },
+            body: JSON.stringify(batch),
+          });
+          if (res.ok) {
+            syncedCount += batch.length;
+          } else {
+            failedCount += batch.length;
+          }
+        } catch {
+          failedCount += batch.length;
+        }
+      }
+
+      return {
+        ok: true,
+        syncedCount,
+        failedCount,
+        totalCount: formattedLeads.length,
+        message: `Synced ${syncedCount} leads to Supabase successfully!`,
+      };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+/**
+ * Server function to export ONLY contacts / phone numbers for WhatsApp & CRM broadcast (ADMIN ONLY).
+ */
+export const exportContactsOnlyCsvData = createServerFn({ method: "POST" })
+  .validator((data: unknown) => authHeaderSchema.parse(data))
+  .handler(async ({ data }) => {
+    try {
+      await assertAdminAuth(data.authToken);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const { data: rows, error } = await supabaseAdmin
+        .from("registrations")
+        .select("id, phone_country_code, phone_number, gender, device_availability, created_at, video_progress(last_position_seconds, completion_status)")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const headers = ["Phone Number", "Clean Phone (10 digits)", "International Phone", "Gender", "Device", "Watch Status", "Registered Date"];
+      const csvRows = (rows || []).map((r: any) => {
+        const vid = Array.isArray(r.video_progress) ? r.video_progress[0] : r.video_progress;
+        const isCompleted = Boolean(vid?.completion_status) || (Number(vid?.last_position_seconds) >= 815);
+        const cleanPhone = (r.phone_number || "").replace(/\D/g, "");
+        const intlPhone = cleanPhone.startsWith("91") && cleanPhone.length === 12 ? `+${cleanPhone}` : `+91${cleanPhone.slice(-10)}`;
+        return [
+          `"${r.phone_number}"`,
+          `"${cleanPhone.slice(-10)}"`,
+          `"${intlPhone}"`,
+          `"${r.gender || ""}"`,
+          `"${r.device_availability || ""}"`,
+          isCompleted ? "Completed (100%)" : `${Number(vid?.last_position_seconds) || 0}s watched`,
+          `"${new Date(r.created_at).toLocaleString("en-IN")}"`,
+        ].join(",");
+      });
+
+      const csvContent = [headers.join(","), ...csvRows].join("\n");
+      return { ok: true, csvContent, filename: `pendugpt_contacts_only_${Date.now()}.csv` };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
+
+/**
+ * Server function to export plain TXT phone numbers (ADMIN ONLY).
+ */
+export const exportPhoneNumbersTxtData = createServerFn({ method: "POST" })
+  .validator((data: unknown) => authHeaderSchema.parse(data))
+  .handler(async ({ data }) => {
+    try {
+      await assertAdminAuth(data.authToken);
+      const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+
+      const { data: rows, error } = await supabaseAdmin
+        .from("registrations")
+        .select("phone_number")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+
+      const phones = Array.from(
+        new Set(
+          (rows || [])
+            .map((r: any) => (r.phone_number || "").replace(/\D/g, ""))
+            .filter((p: string) => p.length >= 10)
+        )
+      );
+
+      return {
+        ok: true,
+        txtContent: phones.join("\n"),
+        filename: `pendugpt_phone_numbers_${Date.now()}.txt`,
+        count: phones.length,
+      };
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
