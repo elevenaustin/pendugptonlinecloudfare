@@ -41,6 +41,7 @@ export function TrainingScreen() {
   const durationRef = useRef(0);
   const lastRemoteSaveRef = useRef(0);
   const registrationIdRef = useRef<string | null>(null);
+  const userPhoneRef = useRef<string | null>(null);
   const milestones = useRef(new Set<number>());
   const completionTriggeredRef = useRef(false);
 
@@ -67,6 +68,7 @@ export function TrainingScreen() {
       }
       regId = reg.registrationId || null;
       registrationIdRef.current = regId;
+      userPhoneRef.current = reg.whatsapp || null;
       setIsAuthorized(true);
     } catch {
       setIsAuthorized(false);
@@ -109,6 +111,7 @@ export function TrainingScreen() {
       fetchRemoteProgress({
         data: {
           registrationId: regId,
+          phone: userPhoneRef.current,
           videoId: vimeoId,
         },
       })
@@ -155,6 +158,7 @@ export function TrainingScreen() {
         saveRemoteProgress({
           data: {
             registrationId: regId,
+            phone: userPhoneRef.current,
             videoId: vimeoId,
             lastPositionSeconds: pos,
             completionStatus: complete,

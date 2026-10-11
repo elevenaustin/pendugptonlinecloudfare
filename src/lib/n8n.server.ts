@@ -1,13 +1,21 @@
 import { createClient } from "@supabase/supabase-js";
 
 export interface SyncLeadOptions {
-  registrationId: string;
+  registrationId?: string | null;
   phone: string;
   countryCode?: string;
   gender?: string | null;
   device?: string | null;
   watchSeconds?: number;
   isCompleted?: boolean;
+  client?: any;
+}
+
+export interface SyncLeadResult {
+  ok: boolean;
+  leadId: string | null;
+  lead: any | null;
+  error?: string;
 }
 
 export interface WebhookResult {
@@ -49,19 +57,27 @@ export function formatHasLaptop(deviceStr?: string | null): string {
   return "later";
 }
 
+export const CRM_DEFAULT_URL = "https://gifxzzrbpukpxsvmhokj.supabase.co";
+export const CRM_DEFAULT_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpZnh6enJicHVrcHhzdm1ob2tqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjQ4ODYsImV4cCI6MjEwNjM0MDg4Nn0.__waNLX5psBQoCoU-kpFDxhwG0J0lTrcZQ-GPE0IpEM";
+
 /**
  * Secure server-side Supabase client dedicated to the Leads & WhatsApp CRM database.
+ * CRITICAL: NEVER fall back to SUPABASE_URL here. That points to the website database
+ * (xlyqrzcstkxdkyvdensc), which does NOT contain public.leads.
  */
 export function getLeadsSupabaseClient() {
   const url =
     process.env.LEADS_SUPABASE_URL ||
-    process.env.SUPABASE_URL ||
-    "https://gifxzzrbpukpxsvmhokj.supabase.co";
+    process.env.CRM_SUPABASE_URL ||
+    CRM_DEFAULT_URL;
 
   const key =
     process.env.LEADS_SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.CRM_SUPABASE_SERVICE_ROLE_KEY ||
     process.env.LEADS_SUPABASE_ANON_KEY ||
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpZnh6enJicHVrcHhzdm1ob2tqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjQ4ODYsImV4cCI6MjEwNjM0MDg4Nn0.__waNLX5psBQoCoU-kpFDxhwG0J0lTrcZQ-GPE0IpEM";
+    process.env.CRM_SUPABASE_ANON_KEY ||
+    CRM_DEFAULT_KEY;
 
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -69,46 +85,66 @@ export function getLeadsSupabaseClient() {
 }
 
 /**
- * Ensures a lead record exists in public.leads in Supabase.
- * Looks up by registrationId or phone.
- * If found, updates watch_seconds and video_completed_at.
- * If missing, inserts a new lead record with genuine UUID so n8n can reliably query it.
+ * Ensures a lead record exists in public.leads in the CRM Supabase.
+ * Looks up by clean phone first, then by registrationId.
+ * If found, updates watch_seconds and video_completed_at and returns the actual CRM lead ID.
+ * If missing, inserts a new lead record with verified registration data.
+ * Returns { ok: false } if phone is missing or insert fails. Never invents an unverified lead.
  */
 export async function syncOrFindLeadRecord(
   opts: SyncLeadOptions,
-): Promise<{ leadId: string; lead: any }> {
-  const client = getLeadsSupabaseClient();
+): Promise<SyncLeadResult> {
+  const client = opts.client || getLeadsSupabaseClient();
   const cleanPhone = formatCleanPhone(opts.phone, opts.countryCode);
   const hasLaptop = formatHasLaptop(opts.device);
   const gender = opts.gender ? opts.gender.toLowerCase() : "unspecified";
   const watchSeconds = Math.round(opts.watchSeconds || 0);
 
+  // If phone is missing or unverified, never invent an ID or placeholder.
+  if (!cleanPhone || cleanPhone.length < 6) {
+    return {
+      ok: false,
+      leadId: null,
+      lead: null,
+      error: "Missing or unverified phone number",
+    };
+  }
+
   let existingLead: any = null;
 
-  // 1. Look up by registration ID (UUID)
-  if (opts.registrationId) {
-    const { data: byId } = await client
+  // 1. Primary lookup by clean phone number in CRM public.leads
+  const { data: byPhone, error: phoneErr } = await client
+    .from("leads")
+    .select("*")
+    .eq("phone", cleanPhone)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (byPhone) {
+    existingLead = byPhone;
+  } else if (phoneErr) {
+    console.warn("[n8n.server] Lead phone lookup notice:", phoneErr.message);
+  }
+
+  // 2. Secondary lookup by registration ID in CRM public.leads if not found by phone
+  if (!existingLead && opts.registrationId) {
+    const { data: byId, error: idErr } = await client
       .from("leads")
       .select("*")
       .eq("id", opts.registrationId)
       .maybeSingle();
-    if (byId) existingLead = byId;
-  }
 
-  // 2. Fall back to lookup by clean phone number
-  if (!existingLead && cleanPhone) {
-    const { data: byPhone } = await client
-      .from("leads")
-      .select("*")
-      .eq("phone", cleanPhone)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (byPhone) existingLead = byPhone;
+    if (byId) {
+      existingLead = byId;
+    } else if (idErr) {
+      console.warn("[n8n.server] Lead ID lookup notice:", idErr.message);
+    }
   }
 
   const nowIso = new Date().toISOString();
 
+  // If lead already exists in CRM, update progress and return the ACTUAL existing CRM lead ID
   if (existingLead) {
     const updatePayload: Record<string, any> = {};
     if (watchSeconds > (Number(existingLead.watch_seconds) || 0)) {
@@ -132,17 +168,18 @@ export async function syncOrFindLeadRecord(
     }
 
     return {
+      ok: true,
       leadId: existingLead.id,
       lead: { ...existingLead, ...updatePayload },
     };
   }
 
-  // 3. Create new lead record in public.leads with UUID
+  // 3. Lead is missing from CRM: safely sync/insert genuine record using verified registration data
   const newLeadId = opts.registrationId || crypto.randomUUID();
   const newLead = {
     id: newLeadId,
     created_at: nowIso,
-    phone: cleanPhone || opts.phone,
+    phone: cleanPhone,
     gender,
     has_laptop: hasLaptop,
     watch_seconds: watchSeconds,
@@ -159,10 +196,28 @@ export async function syncOrFindLeadRecord(
     .maybeSingle();
 
   if (insertError) {
-    console.warn("[n8n.server] Lead upsert warning:", insertError.message);
+    console.warn("[n8n.server] Lead upsert error:", insertError.message);
+    // In case of race condition or conflict, attempt one final lookup by phone
+    const { data: fallbackLead } = await client
+      .from("leads")
+      .select("*")
+      .eq("phone", cleanPhone)
+      .maybeSingle();
+
+    if (fallbackLead) {
+      return { ok: true, leadId: fallbackLead.id, lead: fallbackLead };
+    }
+
+    return {
+      ok: false,
+      leadId: null,
+      lead: null,
+      error: `Failed to persist lead in CRM: ${insertError.message}`,
+    };
   }
 
-  return { leadId: inserted?.id || newLeadId, lead: inserted || newLead };
+  const finalLead = inserted || newLead;
+  return { ok: true, leadId: finalLead.id, lead: finalLead };
 }
 
 /**
@@ -231,21 +286,31 @@ export async function sendN8nWebhook(
 /**
  * Core processor for video completion events:
  * 1. Checks atomic concurrency lock and idempotency in funnel_events.
- * 2. Fetches registration info.
- * 3. Upserts/updates public.leads in Supabase.
- * 4. Confirms the lead exists in public.leads before dispatching.
- * 5. Dispatches the real lead UUID to the n8n Production Webhook.
- * 6. Marks permanently successful in funnel_events ONLY upon HTTP 2xx response.
+ * 2. Enforces genuine completion threshold (>= 750 seconds, ~95% of video).
+ * 3. Fetches verified registration info (or uses supplied phone).
+ * 4. Resolves the genuine CRM public.leads.id (by phone or id), syncing if missing.
+ * 5. Strictly confirms that the lead exists in CRM public.leads before dispatching.
+ * 6. Dispatches ONLY the confirmed CRM lead UUID (never an unverified registration UUID).
+ * 7. Marks permanently successful in funnel_events ONLY upon HTTP 2xx response.
  */
 export async function processVideoCompletionEvent({
   registrationId,
+  phone,
+  videoId: _videoId,
   lastPositionSeconds,
+  websiteClient,
+  crmClient,
 }: {
   registrationId: string;
+  phone?: string | null;
   videoId: string;
   lastPositionSeconds: number;
+  websiteClient?: any;
+  crmClient?: any;
 }): Promise<WebhookResult> {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const adminClient =
+    websiteClient || (await import("@/integrations/supabase/client.server")).supabaseAdmin;
+  const client = crmClient || getLeadsSupabaseClient();
 
   // Atomic in-memory guard to prevent concurrent execution during in-flight dispatch
   if (inFlightDispatches.has(registrationId)) {
@@ -256,7 +321,7 @@ export async function processVideoCompletionEvent({
   }
 
   // 1. Check if n8n webhook was ALREADY sent for this registration
-  const { data: sentEvent } = await supabaseAdmin
+  const { data: sentEvent } = await adminClient
     .from("funnel_events")
     .select("id")
     .eq("registration_id", registrationId)
@@ -287,66 +352,98 @@ export async function processVideoCompletionEvent({
     }
 
     // 3. Fetch registration details from the primary registrations database
-    const { data: reg } = await supabaseAdmin
+    const { data: reg } = await adminClient
       .from("registrations")
       .select("id, phone_country_code, phone_number, gender, device_availability, created_at")
       .eq("id", registrationId)
       .maybeSingle();
 
-    // 4. Find or sync the lead in public.leads in the CRM Supabase
-    const { leadId, lead } = await syncOrFindLeadRecord({
+    const candidatePhone = reg?.phone_number || phone || "";
+    const candidateCountryCode = reg?.phone_country_code || "+91";
+
+    // 4. If neither registration row nor verified phone exists, NEVER invent an ID or send an unverified webhook
+    if (!candidatePhone) {
+      console.error(
+        `[n8n.server] Aborting webhook: Registration ${registrationId} not found in database and no phone provided. Cannot verify CRM lead.`,
+      );
+      return {
+        ok: false,
+        leadId: registrationId,
+        webhookSent: false,
+        error: "Unverified lead: missing registration and phone",
+      };
+    }
+
+    // 5. Find or sync the genuine lead in public.leads in the CRM Supabase
+    const syncRes = await syncOrFindLeadRecord({
       registrationId,
-      phone: reg?.phone_number || "",
-      countryCode: reg?.phone_country_code || "+91",
+      phone: candidatePhone,
+      countryCode: candidateCountryCode,
       gender: reg?.gender,
       device: reg?.device_availability,
       watchSeconds: lastPositionSeconds,
       isCompleted: true,
+      client,
     });
 
-    // 5. Confirm the lead genuinely exists in public.leads in Supabase before dispatching
-    const client = getLeadsSupabaseClient();
+    if (!syncRes.ok || !syncRes.leadId) {
+      console.error(
+        `[n8n.server] Aborting webhook: Could not sync or locate lead in CRM. Error: ${syncRes.error}`,
+      );
+      return {
+        ok: false,
+        leadId: registrationId,
+        webhookSent: false,
+        error: syncRes.error || "CRM sync failed",
+      };
+    }
+
+    const targetCrmLeadId = syncRes.leadId;
+
+    // 6. Confirm the lead genuinely exists in public.leads in CRM Supabase before dispatching
     const { data: verifiedLead, error: verifyErr } = await client
       .from("leads")
       .select("id, phone, unlocked_class, video_completed_at, whatsapp_followup_status")
-      .eq("id", leadId)
+      .eq("id", targetCrmLeadId)
       .maybeSingle();
 
-    if (!verifiedLead || verifyErr) {
+    if (!verifiedLead || verifyErr || !verifiedLead.phone) {
       console.error(
-        `[n8n.server] Aborting webhook: Lead ${leadId} could not be confirmed in public.leads. Error: ${verifyErr?.message}`,
+        `[n8n.server] Aborting webhook: CRM lead ${targetCrmLeadId} could not be confirmed in public.leads. Error: ${verifyErr?.message}`,
       );
-      return { ok: false, leadId, webhookSent: false, error: "Lead verification failed" };
+      return { ok: false, leadId: targetCrmLeadId, webhookSent: false, error: "Lead verification failed" };
     }
 
-    // 6. If lead has already progressed past NOT_SENT in WhatsApp CRM, avoid duplicate message
+    // 7. If lead has already progressed past NOT_SENT in WhatsApp CRM, avoid duplicate message
     if (verifiedLead.whatsapp_followup_status && verifiedLead.whatsapp_followup_status !== "NOT_SENT") {
       console.info(
         `[n8n.server] Lead ${verifiedLead.id} status is '${verifiedLead.whatsapp_followup_status}'. Suppressing duplicate WhatsApp follow-up webhook.`,
       );
-      await supabaseAdmin.from("funnel_events").insert({
+      await adminClient.from("funnel_events").insert({
         registration_id: registrationId,
         event_name: "n8n_video_completed_sent",
       });
       return { ok: true, leadId: verifiedLead.id, webhookSent: true, deduplicated: true };
     }
 
-    // 7. Dispatch verified CRM lead UUID to the n8n Production Webhook
-    console.info(`[n8n.server] Dispatching video_completed event to n8n for confirmed CRM lead_id: ${verifiedLead.id}`);
+    // 8. Dispatch verified CRM lead UUID (never unverified registration UUID) to the n8n Production Webhook
+    console.info(
+      `[n8n.server] Dispatching video_completed event to n8n for confirmed CRM lead_id: ${verifiedLead.id}`,
+    );
     const webhookRes = await sendN8nWebhook(verifiedLead.id);
 
     if (webhookRes.ok) {
       console.info(
-        `[n8n.server] n8n webhook delivered successfully (status: ${webhookRes.status}) for lead_id: ${leadId}`,
+        `[n8n.server] n8n webhook delivered successfully (status: ${webhookRes.status}) for confirmed CRM lead_id: ${verifiedLead.id}`,
       );
       // Mark permanently successful ONLY after receiving positive acknowledgment
-      await supabaseAdmin.from("funnel_events").insert({
+      await adminClient.from("funnel_events").insert({
         registration_id: registrationId,
         event_name: "n8n_video_completed_sent",
       });
       return {
         ok: true,
-        leadId,
+        leadId: verifiedLead.id,
         webhookSent: true,
         status: webhookRes.status,
       };
@@ -355,13 +452,13 @@ export async function processVideoCompletionEvent({
         `[n8n.server] n8n webhook delivery status: ${webhookRes.status} body: ${webhookRes.body}`,
       );
       // Record failure without marking sent, allowing safe retry later
-      await supabaseAdmin.from("funnel_events").insert({
+      await adminClient.from("funnel_events").insert({
         registration_id: registrationId,
         event_name: `n8n_video_completed_failed:${webhookRes.status}`,
       });
       return {
         ok: true, // Non-fatal so frontend class unlock continues uninterrupted
-        leadId,
+        leadId: verifiedLead.id,
         webhookSent: false,
         status: webhookRes.status,
         error: webhookRes.body,
@@ -377,8 +474,10 @@ export async function processVideoCompletionEvent({
  */
 export async function retryVideoCompletion({
   registrationId,
+  phone,
 }: {
   registrationId: string;
+  phone?: string | null;
 }): Promise<WebhookResult> {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
 
@@ -402,7 +501,9 @@ export async function retryVideoCompletion({
 
   return await processVideoCompletionEvent({
     registrationId,
+    phone,
     videoId: "1231615906",
     lastPositionSeconds: Number(prog?.last_position_seconds) || 815,
   });
 }
+

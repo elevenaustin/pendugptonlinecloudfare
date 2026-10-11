@@ -3,6 +3,7 @@ import { z } from "zod";
 
 export const videoProgressSchema = z.object({
   registrationId: z.string().uuid().optional().nullable(),
+  phone: z.string().optional().nullable(),
   videoId: z.string().min(1),
   lastPositionSeconds: z.number().min(0),
   completionStatus: z.boolean().default(false),
@@ -62,6 +63,7 @@ export const saveVideoProgress = createServerFn({ method: "POST" })
         const { processVideoCompletionEvent } = await import("./n8n.server");
         const webhookResult = await processVideoCompletionEvent({
           registrationId: data.registrationId,
+          phone: data.phone,
           videoId: data.videoId,
           lastPositionSeconds: data.lastPositionSeconds,
         });
@@ -91,6 +93,7 @@ export const fetchRemoteVideoProgress = createServerFn({ method: "POST" })
     z
       .object({
         registrationId: z.string().uuid().optional().nullable(),
+        phone: z.string().optional().nullable(),
         videoId: z.string().min(1),
       })
       .parse(data),
@@ -124,6 +127,7 @@ export const fetchRemoteVideoProgress = createServerFn({ method: "POST" })
           import("./n8n.server").then(({ processVideoCompletionEvent }) => {
             processVideoCompletionEvent({
               registrationId: data.registrationId!,
+              phone: data.phone,
               videoId: data.videoId,
               lastPositionSeconds: Number(row.last_position_seconds) || 815,
             }).catch((err) => console.warn("[fetchRemoteVideoProgress] Retry notice:", err));
@@ -151,13 +155,17 @@ export const retryVideoCompletionWebhook = createServerFn({ method: "POST" })
     z
       .object({
         registrationId: z.string().uuid(),
+        phone: z.string().optional().nullable(),
       })
       .parse(data),
   )
   .handler(async ({ data }) => {
     try {
       const { retryVideoCompletion } = await import("./n8n.server");
-      return await retryVideoCompletion({ registrationId: data.registrationId });
+      return await retryVideoCompletion({
+        registrationId: data.registrationId,
+        phone: data.phone,
+      });
     } catch (err: any) {
       return { ok: false, error: err.message };
     }
