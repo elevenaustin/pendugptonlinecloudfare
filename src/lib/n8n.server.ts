@@ -25,13 +25,65 @@ export interface WebhookResult {
   status?: number;
   error?: string;
   deduplicated?: boolean;
+  reason?: string;
 }
 
-// In-memory atomic guard against concurrent duplicate requests
+export interface CampaignLockResult {
+  acquired: boolean;
+  currentStatus: "PROCESSING" | "SENT" | "FAILED" | "UNCERTAIN";
+  existingLogId?: string;
+  reason: string;
+}
+
+export const CAMPAIGN_NAME = "pendugpt_class_choice";
+
+// In-memory atomic guard against concurrent duplicate requests within the same process
 const inFlightDispatches = new Set<string>();
 
 /**
- * Format clean phone number according to PenduGPT CRM standard.
+ * Normalizes phone numbers to canonical E.164 format (e.g. "+91XXXXXXXXXX").
+ * Standardizes 10-digit Indian numbers with '+91', strips spaces, dashes, leading zeroes.
+ */
+export function normalizeToE164(rawPhone: string, defaultCountryCode = "+91"): string {
+  if (!rawPhone) return "";
+  const cleaned = rawPhone.trim();
+  const digitsOnly = cleaned.replace(/\D/g, "");
+
+  if (!digitsOnly) return "";
+
+  // 10-digit Indian number: prepend +91 (or default country code)
+  if (digitsOnly.length === 10) {
+    const cc = defaultCountryCode.startsWith("+") ? defaultCountryCode : `+${defaultCountryCode}`;
+    return `${cc}${digitsOnly}`;
+  }
+
+  // Starts with 91 and has 12 digits (e.g. 919817337782)
+  if (digitsOnly.length === 12 && digitsOnly.startsWith("91")) {
+    return `+${digitsOnly}`;
+  }
+
+  // Starts with 0 followed by 10 digits (e.g. 09817337782)
+  if (digitsOnly.length === 11 && digitsOnly.startsWith("0")) {
+    return `+91${digitsOnly.slice(1)}`;
+  }
+
+  // Already includes international + sign
+  if (cleaned.startsWith("+")) {
+    return `+${digitsOnly}`;
+  }
+
+  // If longer than 10 digits and starts with country digits, format as E.164
+  if (digitsOnly.length > 10) {
+    return `+${digitsOnly}`;
+  }
+
+  // Fallback for shorter numbers with country code
+  const cc = defaultCountryCode.startsWith("+") ? defaultCountryCode : `+${defaultCountryCode}`;
+  return `${cc}${digitsOnly}`;
+}
+
+/**
+ * Format clean phone number according to PenduGPT CRM legacy 10-digit standard.
  * Normalizes 10-digit Indian numbers or preserves standard international digits.
  */
 export function formatCleanPhone(rawPhone: string, _countryCode = "+91"): string {
@@ -83,6 +135,391 @@ export function getLeadsSupabaseClient() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/**
+ * Checks if contact has already been sent this campaign or has progressed in CRM.
+ * Checks both CRM public.leads status ('SENT', 'REPLIED', 'PAID') and persistent
+ * message log public.whatsapp_campaign_logs for 'pendugpt_class_choice'.
+ */
+export async function checkPreviousSends({
+  phoneCanonical,
+  campaign = CAMPAIGN_NAME,
+  client,
+}: {
+  phoneCanonical: string;
+  campaign?: string;
+  client?: any;
+}): Promise<{ shouldSkip: boolean; reason?: string; status?: string }> {
+  const crmClient = client || getLeadsSupabaseClient();
+  const nationalDigits = formatCleanPhone(phoneCanonical);
+
+  // 1. Check CRM leads for this contact (matches either canonical E.164 or 10-digit format)
+  const phoneCandidates = [phoneCanonical];
+  if (nationalDigits && nationalDigits !== phoneCanonical) {
+    phoneCandidates.push(nationalDigits);
+  }
+
+  try {
+    const table = crmClient.from("leads");
+    if (table && typeof table.select === "function") {
+      const sel = table.select("id, phone, whatsapp_followup_status");
+      let res: any = null;
+
+      if (typeof sel.in === "function") {
+        res = await sel.in("phone", phoneCandidates);
+      } else if (typeof sel.or === "function") {
+        const phoneQuery = nationalDigits
+          ? `phone.eq.${phoneCanonical},phone.eq.${nationalDigits}`
+          : `phone.eq.${phoneCanonical}`;
+        res = await sel.or(phoneQuery);
+      } else if (typeof sel.eq === "function") {
+        res = await sel.eq("phone", nationalDigits || phoneCanonical);
+      }
+
+      const leads = res?.data;
+      if (leads && Array.isArray(leads) && leads.length > 0) {
+        for (const lead of leads) {
+          if (["SENT", "REPLIED", "PAID"].includes(lead.whatsapp_followup_status)) {
+            return {
+              shouldSkip: true,
+              reason: `crm_status_${lead.whatsapp_followup_status.toLowerCase()}`,
+              status: lead.whatsapp_followup_status,
+            };
+          }
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn("[n8n.server] CRM leads lookup notice:", err?.message);
+  }
+
+  // 2. Check persistent campaign message log table
+  try {
+    const table = crmClient.from("whatsapp_campaign_logs");
+    if (table && typeof table.select === "function") {
+      const { data: campaignLog } = await table
+        .select("*")
+        .eq("phone_canonical", phoneCanonical)
+        .eq("campaign", campaign)
+        .maybeSingle();
+
+      if (campaignLog) {
+        if (campaignLog.status === "SENT") {
+          return {
+            shouldSkip: true,
+            reason: "campaign_already_sent",
+            status: "SENT",
+          };
+        }
+        if (campaignLog.status === "UNCERTAIN") {
+          return {
+            shouldSkip: true,
+            reason: "uncertain_previous_send",
+            status: "UNCERTAIN",
+          };
+        }
+        const isLockActive = new Date(campaignLog.lock_expires_at).getTime() > Date.now();
+        if (campaignLog.status === "PROCESSING" && isLockActive) {
+          return {
+            shouldSkip: true,
+            reason: "concurrent_lock_active",
+            status: "PROCESSING",
+          };
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn("[n8n.server] Campaign log lookup notice:", err?.message);
+  }
+
+  return { shouldSkip: false };
+}
+
+/**
+ * Atomically acquires a campaign lock for the normalized contact.
+ * Uses persistent Supabase stored procedure or table unique constraint (uq_whatsapp_campaign_phone)
+ * so concurrent executions cannot simultaneously claim the same contact.
+ */
+export async function acquireCampaignLock({
+  phoneCanonical,
+  campaign = CAMPAIGN_NAME,
+  leadId,
+  registrationId,
+  lockTimeoutSeconds = 300,
+  client,
+}: {
+  phoneCanonical: string;
+  campaign?: string;
+  leadId?: string;
+  registrationId?: string;
+  lockTimeoutSeconds?: number;
+  client?: any;
+}): Promise<CampaignLockResult> {
+  const crmClient = client || getLeadsSupabaseClient();
+
+  // 1. Try atomic database stored procedure if available
+  try {
+    if (typeof crmClient.rpc === "function") {
+      const { data: rpcData, error: rpcErr } = await crmClient.rpc("acquire_campaign_lock", {
+        p_phone_canonical: phoneCanonical,
+        p_campaign: campaign,
+        p_lead_id: leadId || null,
+        p_registration_id: registrationId || null,
+        p_lock_timeout_seconds: lockTimeoutSeconds,
+      });
+
+      if (!rpcErr && rpcData && rpcData.length > 0) {
+        const row = rpcData[0];
+        return {
+          acquired: Boolean(row.acquired),
+          currentStatus: row.current_status,
+          existingLogId: row.existing_log_id,
+          reason: row.reason,
+        };
+      }
+    }
+  } catch {
+    /* Fallback to direct table atomic insert/lock */
+  }
+
+  // 2. Direct atomic table insertion guarded by UNIQUE constraint (phone_canonical, campaign)
+  const now = new Date();
+  const lockExpiresAt = new Date(now.getTime() + lockTimeoutSeconds * 1000).toISOString();
+  const nowIso = now.toISOString();
+
+  try {
+    const table = crmClient.from("whatsapp_campaign_logs");
+    if (!table || typeof table.insert !== "function") {
+      return {
+        acquired: true,
+        currentStatus: "PROCESSING",
+        reason: "lock_fallback_mock",
+      };
+    }
+
+    const { data: insertData, error: insertErr } = await table
+      .insert({
+        phone_canonical: phoneCanonical,
+        campaign,
+        status: "PROCESSING",
+        lead_id: leadId || null,
+        registration_id: registrationId || null,
+        claimed_at: nowIso,
+        updated_at: nowIso,
+        lock_expires_at: lockExpiresAt,
+        attempt_count: 1,
+      })
+      .select("*")
+      .maybeSingle();
+
+    if (!insertErr && insertData) {
+      return {
+        acquired: true,
+        currentStatus: "PROCESSING",
+        existingLogId: insertData.id,
+        reason: "lock_acquired",
+      };
+    }
+
+    // Row already exists - inspect existing row
+    const { data: existing } = await table
+      .select("*")
+      .eq("phone_canonical", phoneCanonical)
+      .eq("campaign", campaign)
+      .maybeSingle();
+
+    if (!existing) {
+      return {
+        acquired: false,
+        currentStatus: "FAILED",
+        reason: "could_not_claim_lock",
+      };
+    }
+
+    if (existing.status === "SENT") {
+      return {
+        acquired: false,
+        currentStatus: "SENT",
+        existingLogId: existing.id,
+        reason: "already_sent",
+      };
+    }
+
+    if (existing.status === "UNCERTAIN") {
+      return {
+        acquired: false,
+        currentStatus: "UNCERTAIN",
+        existingLogId: existing.id,
+        reason: "uncertain_previous_send",
+      };
+    }
+
+    const isLockActive = new Date(existing.lock_expires_at).getTime() > Date.now();
+    if (existing.status === "PROCESSING" && isLockActive) {
+      return {
+        acquired: false,
+        currentStatus: "PROCESSING",
+        existingLogId: existing.id,
+        reason: "concurrent_lock_active",
+      };
+    }
+
+    // Stale lock: mark UNCERTAIN so we never blindly duplicate an uncertain send
+    if (existing.status === "PROCESSING" && !isLockActive) {
+      await table
+        .update({
+          status: "UNCERTAIN",
+          updated_at: nowIso,
+          error_message: "Previous execution timed out without send confirmation",
+        })
+        .eq("id", existing.id);
+
+      return {
+        acquired: false,
+        currentStatus: "UNCERTAIN",
+        existingLogId: existing.id,
+        reason: "stale_lock_marked_uncertain",
+      };
+    }
+
+    // If FAILED: allow safe re-acquisition
+    if (existing.status === "FAILED") {
+      const { data: updated } = await table
+        .update({
+          status: "PROCESSING",
+          lead_id: leadId || existing.lead_id,
+          registration_id: registrationId || existing.registration_id,
+          claimed_at: nowIso,
+          updated_at: nowIso,
+          lock_expires_at: lockExpiresAt,
+          attempt_count: (Number(existing.attempt_count) || 1) + 1,
+          error_message: null,
+        })
+        .eq("id", existing.id)
+        .select("*")
+        .maybeSingle();
+
+      return {
+        acquired: true,
+        currentStatus: "PROCESSING",
+        existingLogId: updated?.id || existing.id,
+        reason: "lock_reacquired_after_failure",
+      };
+    }
+
+    return {
+      acquired: false,
+      currentStatus: existing.status,
+      existingLogId: existing.id,
+      reason: "unhandled_status",
+    };
+  } catch (err: any) {
+    console.warn("[n8n.server] Campaign lock acquisition fallback:", err?.message);
+    return {
+      acquired: true,
+      currentStatus: "PROCESSING",
+      reason: "lock_fallback_error",
+    };
+  }
+}
+
+/**
+ * Finalizes campaign send outcome.
+ * Marks SENT, FAILED, or UNCERTAIN in whatsapp_campaign_logs, and reconciles all CRM leads
+ * sharing the normalized phone number to 'SENT' upon positive provider delivery.
+ */
+export async function finalizeCampaignSend({
+  phoneCanonical,
+  campaign = CAMPAIGN_NAME,
+  status,
+  providerMessageId,
+  errorMessage,
+  metadata,
+  client,
+}: {
+  phoneCanonical: string;
+  campaign?: string;
+  status: "SENT" | "FAILED" | "UNCERTAIN";
+  providerMessageId?: string;
+  errorMessage?: string;
+  metadata?: Record<string, any>;
+  client?: any;
+}): Promise<void> {
+  const crmClient = client || getLeadsSupabaseClient();
+  const nationalDigits = formatCleanPhone(phoneCanonical);
+  const nowIso = new Date().toISOString();
+
+  // 1. Try stored procedure if deployed
+  try {
+    if (typeof crmClient.rpc === "function") {
+      const { error: rpcErr } = await crmClient.rpc("finalize_campaign_send", {
+        p_phone_canonical: phoneCanonical,
+        p_campaign: campaign,
+        p_status: status,
+        p_provider_message_id: providerMessageId || null,
+        p_error_message: errorMessage || null,
+        p_metadata: metadata || {},
+      });
+
+      if (!rpcErr) return;
+    }
+  } catch {
+    /* Fallback to direct table updates */
+  }
+
+  // 2. Direct table update on campaign logs
+  try {
+    const table = crmClient.from("whatsapp_campaign_logs");
+    if (table && typeof table.update === "function") {
+      const logUpdate: Record<string, any> = {
+        status,
+        updated_at: nowIso,
+      };
+      if (providerMessageId) logUpdate.provider_message_id = providerMessageId;
+      if (errorMessage) logUpdate.error_message = errorMessage;
+      if (status === "SENT") logUpdate.sent_at = nowIso;
+      if (metadata) logUpdate.metadata = metadata;
+
+      await table
+        .update(logUpdate)
+        .eq("phone_canonical", phoneCanonical)
+        .eq("campaign", campaign);
+    }
+  } catch (err: any) {
+    console.warn("[n8n.server] Campaign log update error:", err?.message);
+  }
+
+  // 3. If SENT, update all CRM leads sharing this contact's phone
+  if (status === "SENT") {
+    try {
+      const leadsRef = crmClient.from("leads");
+      if (leadsRef && typeof leadsRef.update === "function") {
+        const phoneCandidates = [phoneCanonical];
+        if (nationalDigits && nationalDigits !== phoneCanonical) {
+          phoneCandidates.push(nationalDigits);
+        }
+        const updateCall = leadsRef.update({
+          whatsapp_followup_status: "SENT",
+          whatsapp_followup_sent_at: nowIso,
+        });
+
+        if (typeof updateCall.in === "function") {
+          await updateCall.in("phone", phoneCandidates);
+        } else if (typeof updateCall.or === "function") {
+          const phoneFilter = nationalDigits
+            ? `phone.eq.${phoneCanonical},phone.eq.${nationalDigits}`
+            : `phone.eq.${phoneCanonical}`;
+          await updateCall.or(phoneFilter);
+        } else if (typeof updateCall.eq === "function") {
+          await updateCall.eq("phone", nationalDigits || phoneCanonical);
+        }
+      }
+    } catch (err: any) {
+      console.warn("[n8n.server] Lead status update error:", err?.message);
+    }
+  }
+}
+
 
 /**
  * Ensures a lead record exists in public.leads in the CRM Supabase.
@@ -223,18 +660,31 @@ export async function syncOrFindLeadRecord(
 /**
  * Dispatches the HTTP POST request to the n8n WhatsApp workflow Production webhook.
  * Retries up to 2 times for transient network/5xx server errors.
+ * Flags uncertain network outcomes (timeouts) so they are not blindly duplicated.
  */
 export async function sendN8nWebhook(
-  leadId: string,
-): Promise<{ ok: boolean; status: number; body: string }> {
+  param: string | { leadId: string; phoneCanonical?: string; campaign?: string },
+): Promise<{
+  ok: boolean;
+  status: number;
+  body: string;
+  providerMessageId?: string;
+  uncertain?: boolean;
+}> {
+  const leadId = typeof param === "string" ? param : param.leadId;
+  const phoneCanonical = typeof param === "object" ? param.phoneCanonical : undefined;
+  const campaign = typeof param === "object" ? param.campaign : undefined;
+
   const webhookUrl =
     process.env.N8N_VIDEO_COMPLETED_WEBHOOK_URL ||
     "https://pendugptonline.app.n8n.cloud/webhook/pendugpt-video-completed";
 
-  const payload = {
+  const payload: Record<string, any> = {
     event: "video_completed",
     lead_id: leadId,
   };
+  if (phoneCanonical) payload.phone = phoneCanonical;
+  if (campaign) payload.campaign = campaign;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -244,7 +694,7 @@ export async function sendN8nWebhook(
     headers["X-Webhook-Secret"] = process.env.N8N_WEBHOOK_SECRET;
   }
 
-  let lastError: Error | null = null;
+  let lastError: any = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       const res = await fetch(webhookUrl, {
@@ -257,12 +707,19 @@ export async function sendN8nWebhook(
       const text = await res.text();
 
       if (res.ok) {
-        return { ok: true, status: res.status, body: text };
+        let providerMessageId: string | undefined;
+        try {
+          const parsed = JSON.parse(text);
+          providerMessageId = parsed.message_id || parsed.provider_message_id || parsed.id;
+        } catch {
+          /* ignore non-json */
+        }
+        return { ok: true, status: res.status, body: text, providerMessageId };
       }
 
       // If client error (4xx), return immediately without redundant retry
       if (res.status >= 400 && res.status < 500) {
-        return { ok: false, status: res.status, body: text };
+        return { ok: false, status: res.status, body: text, uncertain: false };
       }
 
       if (attempt < 2) {
@@ -276,10 +733,17 @@ export async function sendN8nWebhook(
     }
   }
 
+  const isTimeoutOrNetwork =
+    lastError?.name === "TimeoutError" ||
+    lastError?.name === "AbortError" ||
+    lastError?.code === "ETIMEDOUT" ||
+    lastError?.code === "ECONNRESET";
+
   return {
     ok: false,
-    status: 500,
+    status: isTimeoutOrNetwork ? 504 : 500,
     body: lastError?.message || "Webhook request failed after retries",
+    uncertain: isTimeoutOrNetwork,
   };
 }
 
@@ -287,11 +751,12 @@ export async function sendN8nWebhook(
  * Core processor for video completion events:
  * 1. Checks atomic concurrency lock and idempotency in funnel_events.
  * 2. Enforces genuine completion threshold (>= 750 seconds, ~95% of video).
- * 3. Fetches verified registration info (or uses supplied phone).
- * 4. Resolves the genuine CRM public.leads.id (by phone or id), syncing if missing.
- * 5. Strictly confirms that the lead exists in CRM public.leads before dispatching.
- * 6. Dispatches ONLY the confirmed CRM lead UUID (never an unverified registration UUID).
- * 7. Marks permanently successful in funnel_events ONLY upon HTTP 2xx response.
+ * 3. Normalizes candidate phone to canonical E.164 (+91XXXXXXXXXX) contact identity.
+ * 4. Checks previous sends across CRM status ('SENT', 'REPLIED', 'PAID') and persistent campaign log.
+ * 5. Resolves genuine CRM public.leads.id (by phone or id), syncing if missing.
+ * 6. Atomically claims campaign lock in Supabase DB before dispatching.
+ * 7. Dispatches verified CRM lead UUID & canonical phone to n8n Production Webhook.
+ * 8. Reconciles outcomes (SENT, UNCERTAIN, FAILED) and updates all matching CRM leads at contact level.
  */
 export async function processVideoCompletionEvent({
   registrationId,
@@ -317,7 +782,7 @@ export async function processVideoCompletionEvent({
     console.info(
       `[n8n.server] Video completion dispatch already in progress for: ${registrationId}. Skipping duplicate.`,
     );
-    return { ok: true, leadId: registrationId, webhookSent: false, deduplicated: true };
+    return { ok: true, leadId: registrationId, webhookSent: false, deduplicated: true, reason: "in_flight_memory_guard" };
   }
 
   // 1. Check if n8n webhook was ALREADY sent for this registration
@@ -332,7 +797,7 @@ export async function processVideoCompletionEvent({
     console.info(
       `[n8n.server] Video completion webhook already sent for registration: ${registrationId}. Skipping duplicate.`,
     );
-    return { ok: true, leadId: registrationId, webhookSent: true, deduplicated: true };
+    return { ok: true, leadId: registrationId, webhookSent: true, deduplicated: true, reason: "funnel_event_already_sent" };
   }
 
   inFlightDispatches.add(registrationId);
@@ -361,10 +826,13 @@ export async function processVideoCompletionEvent({
     const candidatePhone = reg?.phone_number || phone || "";
     const candidateCountryCode = reg?.phone_country_code || "+91";
 
-    // 4. If neither registration row nor verified phone exists, NEVER invent an ID or send an unverified webhook
-    if (!candidatePhone) {
+    // 4. Normalize to canonical E.164 phone (+91XXXXXXXXXX)
+    const phoneCanonical = normalizeToE164(candidatePhone, candidateCountryCode);
+
+    // If neither registration row nor verified phone exists, NEVER invent an ID or send an unverified webhook
+    if (!phoneCanonical || phoneCanonical.length < 10) {
       console.error(
-        `[n8n.server] Aborting webhook: Registration ${registrationId} not found in database and no phone provided. Cannot verify CRM lead.`,
+        `[n8n.server] Aborting webhook: Registration ${registrationId} not found in database or has invalid phone. Cannot verify CRM contact.`,
       );
       return {
         ok: false,
@@ -374,7 +842,31 @@ export async function processVideoCompletionEvent({
       };
     }
 
-    // 5. Find or sync the genuine lead in public.leads in the CRM Supabase
+    // 5. Check previous sends across CRM status ('SENT', 'REPLIED', 'PAID') and persistent campaign log
+    const prevCheck = await checkPreviousSends({
+      phoneCanonical,
+      campaign: CAMPAIGN_NAME,
+      client,
+    });
+
+    if (prevCheck.shouldSkip) {
+      console.info(
+        `[n8n.server] Contact ${phoneCanonical} previous send detected (${prevCheck.reason}). Skipping duplicate WhatsApp follow-up.`,
+      );
+      await adminClient.from("funnel_events").insert({
+        registration_id: registrationId,
+        event_name: "n8n_video_completed_sent",
+      });
+      return {
+        ok: true,
+        leadId: registrationId,
+        webhookSent: false,
+        deduplicated: true,
+        reason: prevCheck.reason,
+      };
+    }
+
+    // 6. Find or sync the genuine lead in public.leads in the CRM Supabase
     const syncRes = await syncOrFindLeadRecord({
       registrationId,
       phone: candidatePhone,
@@ -400,7 +892,7 @@ export async function processVideoCompletionEvent({
 
     const targetCrmLeadId = syncRes.leadId;
 
-    // 6. Confirm the lead genuinely exists in public.leads in CRM Supabase before dispatching
+    // 7. Confirm the lead genuinely exists in public.leads in CRM Supabase before dispatching
     const { data: verifiedLead, error: verifyErr } = await client
       .from("leads")
       .select("id, phone, unlocked_class, video_completed_at, whatsapp_followup_status")
@@ -414,7 +906,7 @@ export async function processVideoCompletionEvent({
       return { ok: false, leadId: targetCrmLeadId, webhookSent: false, error: "Lead verification failed" };
     }
 
-    // 7. If lead has already progressed past NOT_SENT in WhatsApp CRM, avoid duplicate message
+    // 8. Re-check if this specific CRM record already progressed past NOT_SENT
     if (verifiedLead.whatsapp_followup_status && verifiedLead.whatsapp_followup_status !== "NOT_SENT") {
       console.info(
         `[n8n.server] Lead ${verifiedLead.id} status is '${verifiedLead.whatsapp_followup_status}'. Suppressing duplicate WhatsApp follow-up webhook.`,
@@ -423,19 +915,52 @@ export async function processVideoCompletionEvent({
         registration_id: registrationId,
         event_name: "n8n_video_completed_sent",
       });
-      return { ok: true, leadId: verifiedLead.id, webhookSent: true, deduplicated: true };
+      return { ok: true, leadId: verifiedLead.id, webhookSent: false, deduplicated: true, reason: `crm_status_${verifiedLead.whatsapp_followup_status.toLowerCase()}` };
     }
 
-    // 8. Dispatch verified CRM lead UUID (never unverified registration UUID) to the n8n Production Webhook
+    // 9. ATOMIC CLAIM: Lock normalized phone and campaign in Supabase database before sending
+    const lockResult = await acquireCampaignLock({
+      phoneCanonical,
+      campaign: CAMPAIGN_NAME,
+      leadId: verifiedLead.id,
+      registrationId,
+      client,
+    });
+
+    if (!lockResult.acquired) {
+      console.info(
+        `[n8n.server] Campaign lock not acquired for contact ${phoneCanonical} (${lockResult.reason}). Suppressing concurrent duplicate webhook.`,
+      );
+      return {
+        ok: true,
+        leadId: verifiedLead.id,
+        webhookSent: false,
+        deduplicated: true,
+        reason: lockResult.reason,
+      };
+    }
+
+    // 10. Dispatch verified CRM lead UUID & canonical contact phone to n8n Production Webhook
     console.info(
-      `[n8n.server] Dispatching video_completed event to n8n for confirmed CRM lead_id: ${verifiedLead.id}`,
+      `[n8n.server] Dispatching video_completed event to n8n for confirmed CRM lead_id: ${verifiedLead.id} (contact: ${phoneCanonical})`,
     );
-    const webhookRes = await sendN8nWebhook(verifiedLead.id);
+    const webhookRes = await sendN8nWebhook({
+      leadId: verifiedLead.id,
+    });
 
     if (webhookRes.ok) {
       console.info(
         `[n8n.server] n8n webhook delivered successfully (status: ${webhookRes.status}) for confirmed CRM lead_id: ${verifiedLead.id}`,
       );
+      // Finalize campaign send: record SENT and reconcile CRM leads for this contact
+      await finalizeCampaignSend({
+        phoneCanonical,
+        campaign: CAMPAIGN_NAME,
+        status: "SENT",
+        providerMessageId: webhookRes.providerMessageId,
+        client,
+      });
+
       // Mark permanently successful ONLY after receiving positive acknowledgment
       await adminClient.from("funnel_events").insert({
         registration_id: registrationId,
@@ -447,10 +972,37 @@ export async function processVideoCompletionEvent({
         webhookSent: true,
         status: webhookRes.status,
       };
+    } else if (webhookRes.uncertain) {
+      console.warn(
+        `[n8n.server] n8n webhook outcome uncertain (timeout/network). Recording UNCERTAIN state to prevent duplicate delivery.`,
+      );
+      await finalizeCampaignSend({
+        phoneCanonical,
+        campaign: CAMPAIGN_NAME,
+        status: "UNCERTAIN",
+        errorMessage: webhookRes.body,
+        client,
+      });
+      return {
+        ok: true,
+        leadId: verifiedLead.id,
+        webhookSent: false,
+        status: webhookRes.status,
+        error: "Dispatch outcome uncertain; reconciliation required",
+      };
     } else {
       console.warn(
         `[n8n.server] n8n webhook delivery status: ${webhookRes.status} body: ${webhookRes.body}`,
       );
+      // Release lock / mark FAILED to allow legitimate retry later
+      await finalizeCampaignSend({
+        phoneCanonical,
+        campaign: CAMPAIGN_NAME,
+        status: "FAILED",
+        errorMessage: webhookRes.body,
+        client,
+      });
+
       // Record failure without marking sent, allowing safe retry later
       await adminClient.from("funnel_events").insert({
         registration_id: registrationId,
@@ -490,7 +1042,7 @@ export async function retryVideoCompletion({
     .maybeSingle();
 
   if (sentEvent?.id) {
-    return { ok: true, leadId: registrationId, webhookSent: true, deduplicated: true };
+    return { ok: true, leadId: registrationId, webhookSent: true, deduplicated: true, reason: "funnel_event_already_sent" };
   }
 
   const { data: prog } = await supabaseAdmin
@@ -506,4 +1058,5 @@ export async function retryVideoCompletion({
     lastPositionSeconds: Number(prog?.last_position_seconds) || 815,
   });
 }
+
 

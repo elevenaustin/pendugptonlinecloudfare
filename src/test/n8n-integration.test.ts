@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { formatCleanPhone, formatHasLaptop, sendN8nWebhook } from "@/lib/n8n.server";
+import {
+  formatCleanPhone,
+  formatHasLaptop,
+  sendN8nWebhook,
+  normalizeToE164,
+  checkPreviousSends,
+  acquireCampaignLock,
+  finalizeCampaignSend,
+  processVideoCompletionEvent,
+  CAMPAIGN_NAME,
+} from "@/lib/n8n.server";
 
 describe("n8n WhatsApp Follow-up & Leads Integration", () => {
   beforeEach(() => {
@@ -513,12 +523,709 @@ describe("n8n WhatsApp Follow-up & Leads Integration", () => {
       });
 
       expect(result.ok).toBe(true);
-      expect(result.webhookSent).toBe(true);
+      expect(result.webhookSent).toBe(false);
       expect(result.deduplicated).toBe(true);
       // Fetch to n8n should NOT be called since follow-up was already sent
       expect(fetchMock).not.toHaveBeenCalled();
     });
   });
+
+  describe("Phone number normalization to canonical E.164", () => {
+    it("converts 10-digit Indian numbers to +91XXXXXXXXXX", () => {
+      expect(normalizeToE164("9817337782")).toBe("+919817337782");
+      expect(normalizeToE164("8708315700")).toBe("+918708315700");
+    });
+
+    it("handles Indian numbers with +91, spaces, and hyphens", () => {
+      expect(normalizeToE164("+91 98173 37782")).toBe("+919817337782");
+      expect(normalizeToE164("+91-8708-315-700")).toBe("+918708315700");
+    });
+
+    it("handles numbers starting with 91 or leading 0 trunk prefix", () => {
+      expect(normalizeToE164("919817337782")).toBe("+919817337782");
+      expect(normalizeToE164("09817337782")).toBe("+919817337782");
+    });
+
+    it("handles international numbers outside India", () => {
+      expect(normalizeToE164("+1 415 555 2671")).toBe("+14155552671");
+      expect(normalizeToE164("+44 7911 123456")).toBe("+447911123456");
+    });
+
+    it("returns empty string for invalid or empty inputs", () => {
+      expect(normalizeToE164("")).toBe("");
+      expect(normalizeToE164("   ")).toBe("");
+      expect(normalizeToE164("invalid")).toBe("");
+    });
+  });
+
+  describe("Check previous sends across CRM and campaign logs", () => {
+    const canonicalPhone = "+919817337782";
+
+    it("skips contact if CRM status is SENT", async () => {
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () => Promise.resolve({ data: [{ id: "l1", whatsapp_followup_status: "SENT" }] }),
+              }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }) }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await checkPreviousSends({ phoneCanonical: canonicalPhone, client: mockClient });
+      expect(result.shouldSkip).toBe(true);
+      expect(result.reason).toBe("crm_status_sent");
+      expect(result.status).toBe("SENT");
+    });
+
+    it("skips contact if CRM status is REPLIED", async () => {
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () => Promise.resolve({ data: [{ id: "l2", whatsapp_followup_status: "REPLIED" }] }),
+              }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }) }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await checkPreviousSends({ phoneCanonical: canonicalPhone, client: mockClient });
+      expect(result.shouldSkip).toBe(true);
+      expect(result.reason).toBe("crm_status_replied");
+    });
+
+    it("skips contact if CRM status is PAID", async () => {
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () => Promise.resolve({ data: [{ id: "l3", whatsapp_followup_status: "PAID" }] }),
+              }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }) }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await checkPreviousSends({ phoneCanonical: canonicalPhone, client: mockClient });
+      expect(result.shouldSkip).toBe(true);
+      expect(result.reason).toBe("crm_status_paid");
+    });
+
+    it("skips contact if campaign log is already SENT", async () => {
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () => Promise.resolve({ data: [{ id: "l4", whatsapp_followup_status: "NOT_SENT" }] }),
+              }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => Promise.resolve({ data: { status: "SENT" } }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await checkPreviousSends({ phoneCanonical: canonicalPhone, client: mockClient });
+      expect(result.shouldSkip).toBe(true);
+      expect(result.reason).toBe("campaign_already_sent");
+    });
+
+    it("skips contact if campaign log is UNCERTAIN (requires reconciliation)", async () => {
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () => Promise.resolve({ data: [] }),
+              }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => Promise.resolve({ data: { status: "UNCERTAIN" } }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await checkPreviousSends({ phoneCanonical: canonicalPhone, client: mockClient });
+      expect(result.shouldSkip).toBe(true);
+      expect(result.reason).toBe("uncertain_previous_send");
+    });
+
+    it("does not skip contact if CRM is NOT_SENT and no campaign log exists", async () => {
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () => Promise.resolve({ data: [{ id: "l5", whatsapp_followup_status: "NOT_SENT" }] }),
+              }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }) }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await checkPreviousSends({ phoneCanonical: canonicalPhone, client: mockClient });
+      expect(result.shouldSkip).toBe(false);
+    });
+  });
+
+  describe("Simultaneous execution prevention & Atomic lock", () => {
+    const phoneCanonical = "+919817337782";
+
+    it("acquires lock atomically for new contact", async () => {
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              insert: (payload: any) => ({
+                select: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: { id: "log-1", status: "PROCESSING", ...payload },
+                      error: null,
+                    }),
+                }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await acquireCampaignLock({
+        phoneCanonical,
+        leadId: "lead-1",
+        client: mockClient,
+      });
+
+      expect(result.acquired).toBe(true);
+      expect(result.currentStatus).toBe("PROCESSING");
+      expect(result.existingLogId).toBe("log-1");
+    });
+
+    it("blocks concurrent execution when active lock is held by another process", async () => {
+      const futureDate = new Date(Date.now() + 180000).toISOString();
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              insert: () => ({
+                select: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: null,
+                      error: { code: "23505", message: "duplicate key" },
+                    }),
+                }),
+              }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: {
+                          id: "existing-lock-uuid",
+                          status: "PROCESSING",
+                          lock_expires_at: futureDate,
+                        },
+                      }),
+                  }),
+                }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await acquireCampaignLock({
+        phoneCanonical,
+        leadId: "lead-2",
+        client: mockClient,
+      });
+
+      expect(result.acquired).toBe(false);
+      expect(result.currentStatus).toBe("PROCESSING");
+      expect(result.reason).toBe("concurrent_lock_active");
+    });
+
+    it("marks stale lock as UNCERTAIN to prevent duplicate sending", async () => {
+      const pastDate = new Date(Date.now() - 60000).toISOString();
+      let updatedStatus: string | null = null;
+
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              insert: () => ({
+                select: () => ({
+                  maybeSingle: () => Promise.resolve({ data: null, error: { code: "23505" } }),
+                }),
+              }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: {
+                          id: "stale-lock-uuid",
+                          status: "PROCESSING",
+                          lock_expires_at: pastDate,
+                        },
+                      }),
+                  }),
+                }),
+              }),
+              update: (patch: any) => {
+                updatedStatus = patch.status;
+                return {
+                  eq: () => Promise.resolve({ error: null }),
+                };
+              },
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await acquireCampaignLock({
+        phoneCanonical,
+        leadId: "lead-stale",
+        client: mockClient,
+      });
+
+      expect(result.acquired).toBe(false);
+      expect(result.currentStatus).toBe("UNCERTAIN");
+      expect(result.reason).toBe("stale_lock_marked_uncertain");
+      expect(updatedStatus).toBe("UNCERTAIN");
+    });
+
+    it("allows safe re-acquisition after prior send failure (FAILED)", async () => {
+      let updatedStatus: string | null = null;
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              insert: () => ({
+                select: () => ({
+                  maybeSingle: () => Promise.resolve({ data: null, error: { code: "23505" } }),
+                }),
+              }),
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: {
+                          id: "failed-lock-uuid",
+                          status: "FAILED",
+                          attempt_count: 1,
+                        },
+                      }),
+                  }),
+                }),
+              }),
+              update: (patch: any) => {
+                updatedStatus = patch.status;
+                return {
+                  eq: () => ({
+                    select: () => ({
+                      maybeSingle: () =>
+                        Promise.resolve({
+                          data: { id: "failed-lock-uuid", status: patch.status, attempt_count: 2 },
+                        }),
+                    }),
+                  }),
+                };
+              },
+            };
+          }
+          return {};
+        }),
+      };
+
+      const result = await acquireCampaignLock({
+        phoneCanonical,
+        leadId: "lead-retry",
+        client: mockClient,
+      });
+
+      expect(result.acquired).toBe(true);
+      expect(result.currentStatus).toBe("PROCESSING");
+      expect(result.reason).toBe("lock_reacquired_after_failure");
+      expect(updatedStatus).toBe("PROCESSING");
+    });
+  });
+
+  describe("Finalize campaign send & CRM contact-level deduplication", () => {
+    it("updates all CRM leads sharing the phone to SENT and logs provider message ID", async () => {
+      const canonicalPhone = "+919817337782";
+      let loggedStatus: string | null = null;
+      let loggedProviderId: string | null = null;
+      let crmUpdatedStatus: string | null = null;
+      let crmUpdatedPhoneFilter: any = null;
+
+      const mockClient = {
+        from: vi.fn((table: string) => {
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              update: (patch: any) => {
+                loggedStatus = patch.status;
+                loggedProviderId = patch.provider_message_id;
+                return {
+                  eq: () => ({ eq: () => Promise.resolve({ error: null }) }),
+                };
+              },
+            };
+          }
+          if (table === "leads") {
+            return {
+              update: (patch: any) => {
+                crmUpdatedStatus = patch.whatsapp_followup_status;
+                return {
+                  in: (_col: string, vals: any[]) => {
+                    crmUpdatedPhoneFilter = vals;
+                    return Promise.resolve({ error: null });
+                  },
+                };
+              },
+            };
+          }
+          return {};
+        }),
+      };
+
+      await finalizeCampaignSend({
+        phoneCanonical: canonicalPhone,
+        status: "SENT",
+        providerMessageId: "wamid_HBgMOTE5ODE3MzM3NzgyFQIAERgSMzNBM0E1",
+        client: mockClient,
+      });
+
+      expect(loggedStatus).toBe("SENT");
+      expect(loggedProviderId).toBe("wamid_HBgMOTE5ODE3MzM3NzgyFQIAERgSMzNBM0E1");
+      expect(crmUpdatedStatus).toBe("SENT");
+      expect(crmUpdatedPhoneFilter).toContain(canonicalPhone);
+      expect(crmUpdatedPhoneFilter).toContain("9817337782");
+    });
+  });
+
+  describe("Safe retry and uncertain outcome reconciliation", () => {
+    it("marks campaign log UNCERTAIN on network timeout and halts automatic retry", async () => {
+      const registrationId = "timeout-reg-uuid";
+      const studentPhone = "9817337782";
+      let campaignFinalStatus: string | null = null;
+
+      const mockWebsiteClient = {
+        from: vi.fn((table: string) => {
+          if (table === "funnel_events") {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }) }),
+              }),
+              insert: () => Promise.resolve({ error: null }),
+            };
+          }
+          if (table === "registrations") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: {
+                        id: registrationId,
+                        phone_number: studentPhone,
+                        phone_country_code: "+91",
+                      },
+                    }),
+                }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const mockCrmClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () => Promise.resolve({ data: [] }),
+                eq: () => ({
+                  order: () => ({
+                    limit: () => ({
+                      maybeSingle: () =>
+                        Promise.resolve({
+                          data: {
+                            id: "crm-timeout-lead",
+                            phone: studentPhone,
+                            whatsapp_followup_status: "NOT_SENT",
+                          },
+                        }),
+                    }),
+                  }),
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: {
+                        id: "crm-timeout-lead",
+                        phone: studentPhone,
+                        whatsapp_followup_status: "NOT_SENT",
+                      },
+                    }),
+                }),
+              }),
+              update: () => ({ eq: () => Promise.resolve({ error: null }) }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: null }) }) }),
+              }),
+              insert: () => ({
+                select: () => ({
+                  maybeSingle: () => Promise.resolve({ data: { id: "lock-to", status: "PROCESSING" } }),
+                }),
+              }),
+              update: (patch: any) => {
+                campaignFinalStatus = patch.status;
+                return { eq: () => ({ eq: () => Promise.resolve({ error: null }) }) };
+              },
+            };
+          }
+          return {};
+        }),
+      };
+
+      // Mock fetch timing out with AbortError
+      const abortError = new Error("The operation was aborted");
+      abortError.name = "AbortError";
+      const fetchMock = vi.fn().mockRejectedValue(abortError);
+      vi.stubGlobal("fetch", fetchMock);
+
+      const result = await processVideoCompletionEvent({
+        registrationId,
+        videoId: "1231615906",
+        lastPositionSeconds: 820,
+        websiteClient: mockWebsiteClient,
+        crmClient: mockCrmClient,
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.webhookSent).toBe(false);
+      expect(result.error).toContain("uncertain");
+      expect(campaignFinalStatus).toBe("UNCERTAIN");
+    });
+
+    it("deduplicates repeated video-completion events for the same contact across multiple calls/retries", async () => {
+      const studentPhone = "9817337782";
+      let campaignStatus = "NONE";
+      const funnelEvents = new Set<string>();
+
+      const mockWebsiteClient = {
+        from: vi.fn((table: string) => {
+          if (table === "funnel_events") {
+            return {
+              select: () => ({
+                eq: (_col: string, val: string) => ({
+                  eq: (_col2: string, eventName: string) => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: funnelEvents.has(`${val}:${eventName}`) ? { id: "fe-1" } : null,
+                      }),
+                  }),
+                }),
+              }),
+              insert: (record: any) => {
+                funnelEvents.add(`${record.registration_id}:${record.event_name}`);
+                return Promise.resolve({ error: null });
+              },
+            };
+          }
+          if (table === "registrations") {
+            return {
+              select: () => ({
+                eq: (_col: string, val: string) => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: {
+                        id: val,
+                        phone_number: studentPhone,
+                        phone_country_code: "+91",
+                      },
+                    }),
+                }),
+              }),
+            };
+          }
+          return {};
+        }),
+      };
+
+      const mockCrmClient = {
+        from: vi.fn((table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                in: () =>
+                  Promise.resolve({
+                    data:
+                      campaignStatus === "SENT"
+                        ? [{ id: "crm-lead-repeat", phone: studentPhone, whatsapp_followup_status: "SENT" }]
+                        : [],
+                  }),
+                eq: () => ({
+                  order: () => ({
+                    limit: () => ({
+                      maybeSingle: () =>
+                        Promise.resolve({
+                          data: {
+                            id: "crm-lead-repeat",
+                            phone: studentPhone,
+                            whatsapp_followup_status: campaignStatus === "SENT" ? "SENT" : "NOT_SENT",
+                          },
+                        }),
+                    }),
+                  }),
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: {
+                        id: "crm-lead-repeat",
+                        phone: studentPhone,
+                        whatsapp_followup_status: campaignStatus === "SENT" ? "SENT" : "NOT_SENT",
+                      },
+                    }),
+                }),
+              }),
+              update: () => ({
+                eq: () => Promise.resolve({ error: null }),
+                in: () => Promise.resolve({ error: null }),
+              }),
+            };
+          }
+          if (table === "whatsapp_campaign_logs") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: campaignStatus === "SENT" ? { status: "SENT" } : null,
+                      }),
+                  }),
+                }),
+              }),
+              insert: () => ({
+                select: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({ data: { id: "lock-repeat", status: "PROCESSING" } }),
+                }),
+              }),
+              update: (patch: any) => {
+                campaignStatus = patch.status;
+                return { eq: () => ({ eq: () => Promise.resolve({ error: null }) }) };
+              },
+            };
+          }
+          return {};
+        }),
+      };
+
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: () => Promise.resolve('{"message_id":"wamid.repeat1"}'),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      // Event 1: First video completion
+      const res1 = await processVideoCompletionEvent({
+        registrationId: "reg-repeat-1",
+        videoId: "1231615906",
+        lastPositionSeconds: 820,
+        websiteClient: mockWebsiteClient,
+        crmClient: mockCrmClient,
+      });
+
+      expect(res1.ok).toBe(true);
+      expect(res1.webhookSent).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Event 2: Immediate retry or second completion event with another registration ID but SAME phone
+      const res2 = await processVideoCompletionEvent({
+        registrationId: "reg-repeat-2",
+        videoId: "1231615906",
+        lastPositionSeconds: 825,
+        websiteClient: mockWebsiteClient,
+        crmClient: mockCrmClient,
+      });
+
+      expect(res2.ok).toBe(true);
+      expect(res2.webhookSent).toBe(false);
+      expect(res2.deduplicated).toBe(true);
+      // Fetch should NEVER be called again! Exactly 1 delivery for this phone.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });
+
 
 
