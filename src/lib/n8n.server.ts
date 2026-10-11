@@ -273,14 +273,27 @@ export async function processVideoCompletionEvent({
   inFlightDispatches.add(registrationId);
 
   try {
-    // 2. Fetch registration details from the primary registrations database
+    // 2. Verify genuine completion watch threshold (95% of ~858s video is ~815s; require at least 750s)
+    if (lastPositionSeconds < 750) {
+      console.warn(
+        `[n8n.server] Refusing webhook dispatch: watch time ${lastPositionSeconds}s does not meet genuine completion threshold (>= 750s).`,
+      );
+      return {
+        ok: true,
+        leadId: registrationId,
+        webhookSent: false,
+        error: "Completion threshold not reached",
+      };
+    }
+
+    // 3. Fetch registration details from the primary registrations database
     const { data: reg } = await supabaseAdmin
       .from("registrations")
       .select("id, phone_country_code, phone_number, gender, device_availability, created_at")
       .eq("id", registrationId)
       .maybeSingle();
 
-    // 3. Find or sync the lead in public.leads in the CRM Supabase
+    // 4. Find or sync the lead in public.leads in the CRM Supabase
     const { leadId, lead } = await syncOrFindLeadRecord({
       registrationId,
       phone: reg?.phone_number || "",
@@ -291,7 +304,7 @@ export async function processVideoCompletionEvent({
       isCompleted: true,
     });
 
-    // 4. Confirm the lead genuinely exists in public.leads in Supabase before dispatching
+    // 5. Confirm the lead genuinely exists in public.leads in Supabase before dispatching
     const client = getLeadsSupabaseClient();
     const { data: verifiedLead, error: verifyErr } = await client
       .from("leads")
@@ -306,21 +319,21 @@ export async function processVideoCompletionEvent({
       return { ok: false, leadId, webhookSent: false, error: "Lead verification failed" };
     }
 
-    // 5. If lead has already progressed past NOT_SENT in WhatsApp CRM, avoid duplicate message
+    // 6. If lead has already progressed past NOT_SENT in WhatsApp CRM, avoid duplicate message
     if (verifiedLead.whatsapp_followup_status && verifiedLead.whatsapp_followup_status !== "NOT_SENT") {
       console.info(
-        `[n8n.server] Lead ${leadId} status is '${verifiedLead.whatsapp_followup_status}'. Suppressing duplicate WhatsApp follow-up webhook.`,
+        `[n8n.server] Lead ${verifiedLead.id} status is '${verifiedLead.whatsapp_followup_status}'. Suppressing duplicate WhatsApp follow-up webhook.`,
       );
       await supabaseAdmin.from("funnel_events").insert({
         registration_id: registrationId,
         event_name: "n8n_video_completed_sent",
       });
-      return { ok: true, leadId, webhookSent: true, deduplicated: true };
+      return { ok: true, leadId: verifiedLead.id, webhookSent: true, deduplicated: true };
     }
 
-    // 6. Dispatch real Supabase lead UUID to the n8n Production Webhook
-    console.info(`[n8n.server] Dispatching video_completed event to n8n for lead_id: ${leadId}`);
-    const webhookRes = await sendN8nWebhook(leadId);
+    // 7. Dispatch verified CRM lead UUID to the n8n Production Webhook
+    console.info(`[n8n.server] Dispatching video_completed event to n8n for confirmed CRM lead_id: ${verifiedLead.id}`);
+    const webhookRes = await sendN8nWebhook(verifiedLead.id);
 
     if (webhookRes.ok) {
       console.info(
