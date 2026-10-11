@@ -79,6 +79,22 @@ export const submitRegistration = createServerFn({ method: "POST" })
           registration_id: registrationId,
           event_name: "registration_completed",
         });
+
+        // Ensure lead record is synced to public.leads in Supabase
+        try {
+          const { syncOrFindLeadRecord } = await import("./n8n.server");
+          await syncOrFindLeadRecord({
+            registrationId,
+            phone,
+            countryCode,
+            gender: data.gender,
+            device: data.device,
+            watchSeconds: 0,
+            isCompleted: false,
+          });
+        } catch (crmErr) {
+          console.warn("[submitRegistration] CRM lead sync notice:", crmErr);
+        }
       }
     } catch (err) {
       console.warn("Server registration handler notice:", err);

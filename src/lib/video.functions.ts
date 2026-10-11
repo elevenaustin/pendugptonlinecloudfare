@@ -43,10 +43,36 @@ export const saveVideoProgress = createServerFn({ method: "POST" })
       }
 
       if (data.completionStatus) {
-        await supabaseAdmin.from("funnel_events").insert({
-          registration_id: data.registrationId,
-          event_name: "training_video_completed",
+        // Record funnel event if not already present
+        const { data: existingEvent } = await supabaseAdmin
+          .from("funnel_events")
+          .select("id")
+          .eq("registration_id", data.registrationId)
+          .eq("event_name", "training_video_completed")
+          .maybeSingle();
+
+        if (!existingEvent) {
+          await supabaseAdmin.from("funnel_events").insert({
+            registration_id: data.registrationId,
+            event_name: "training_video_completed",
+          });
+        }
+
+        // Trigger secure server-side n8n webhook & update Supabase Leads record
+        const { processVideoCompletionEvent } = await import("./n8n.server");
+        const webhookResult = await processVideoCompletionEvent({
+          registrationId: data.registrationId,
+          videoId: data.videoId,
+          lastPositionSeconds: data.lastPositionSeconds,
         });
+
+        return {
+          ok: true,
+          saved: true,
+          leadId: webhookResult.leadId,
+          webhookSent: webhookResult.webhookSent,
+          deduplicated: webhookResult.deduplicated,
+        };
       }
 
       return { ok: true, saved: true };
@@ -58,6 +84,7 @@ export const saveVideoProgress = createServerFn({ method: "POST" })
 
 /**
  * Server function to fetch remote saved playback progress.
+ * If video is completed but webhook failed previously, triggers safe background retry.
  */
 export const fetchRemoteVideoProgress = createServerFn({ method: "POST" })
   .validator((data: unknown) =>
@@ -82,14 +109,57 @@ export const fetchRemoteVideoProgress = createServerFn({ method: "POST" })
 
       if (error || !row) return { ok: false, progress: null };
 
+      const isCompleted = Boolean(row.completion_status);
+
+      // Safe background retry if completed but webhook was not delivered yet
+      if (isCompleted && data.registrationId) {
+        const { data: sentEvent } = await supabaseAdmin
+          .from("funnel_events")
+          .select("id")
+          .eq("registration_id", data.registrationId)
+          .eq("event_name", "n8n_video_completed_sent")
+          .maybeSingle();
+
+        if (!sentEvent) {
+          import("./n8n.server").then(({ processVideoCompletionEvent }) => {
+            processVideoCompletionEvent({
+              registrationId: data.registrationId!,
+              videoId: data.videoId,
+              lastPositionSeconds: Number(row.last_position_seconds) || 815,
+            }).catch((err) => console.warn("[fetchRemoteVideoProgress] Retry notice:", err));
+          });
+        }
+      }
+
       return {
         ok: true,
         progress: {
           lastPosition: Number(row.last_position_seconds) || 0,
-          isCompleted: Boolean(row.completion_status),
+          isCompleted,
         },
       };
     } catch {
       return { ok: false, progress: null };
     }
   });
+
+/**
+ * Server function to explicitly retry video completion webhook for a registration.
+ */
+export const retryVideoCompletionWebhook = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z
+      .object({
+        registrationId: z.string().uuid(),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data }) => {
+    try {
+      const { retryVideoCompletion } = await import("./n8n.server");
+      return await retryVideoCompletion({ registrationId: data.registrationId });
+    } catch (err: any) {
+      return { ok: false, error: err.message };
+    }
+  });
+

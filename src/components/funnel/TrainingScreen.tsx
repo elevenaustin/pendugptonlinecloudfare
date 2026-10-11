@@ -42,6 +42,7 @@ export function TrainingScreen() {
   const lastRemoteSaveRef = useRef(0);
   const registrationIdRef = useRef<string | null>(null);
   const milestones = useRef(new Set<number>());
+  const completionTriggeredRef = useRef(false);
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [progress, setProgress] = useState(0);
@@ -77,6 +78,7 @@ export function TrainingScreen() {
     try {
       const savedCompleted = localStorage.getItem(completionKey) === "true";
       if (savedCompleted) {
+        completionTriggeredRef.current = true;
         setIsCompleted(true);
         setProgress(1);
       }
@@ -113,6 +115,7 @@ export function TrainingScreen() {
         .then((res) => {
           if (res?.ok && res.progress) {
             if (res.progress.isCompleted) {
+              completionTriggeredRef.current = true;
               setIsCompleted(true);
               setProgress(1);
             }
@@ -183,10 +186,16 @@ export function TrainingScreen() {
     };
   }, [progress, isCompleted]);
 
-  const handleCompletion = () => {
+  const handleCompletion = (force = false) => {
+    if (completionTriggeredRef.current && !force) return;
+    completionTriggeredRef.current = true;
     setIsCompleted(true);
     setProgress(1);
-    persist(1, true);
+    const completedPos =
+      durationRef.current > 0
+        ? durationRef.current
+        : Math.max(lastPositionRef.current, watchedRef.current);
+    persist(1, true, completedPos);
     track("video_complete");
   };
 
@@ -767,7 +776,7 @@ export function TrainingScreen() {
 
                 {/* Dev bypass or quick test */}
                 <button
-                  onClick={handleCompletion}
+                  onClick={() => handleCompletion(true)}
                   className="hidden md:inline-flex text-[11px] font-mono text-white/30 hover:text-[#00F076] transition-colors"
                   title="Fast-forward completion for testing"
                 >
