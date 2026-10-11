@@ -773,15 +773,6 @@ export function TrainingScreen() {
                     </p>
                   </div>
                 </div>
-
-                {/* Dev bypass or quick test */}
-                <button
-                  onClick={() => handleCompletion(true)}
-                  className="hidden md:inline-flex text-[11px] font-mono text-white/30 hover:text-[#00F076] transition-colors"
-                  title="Fast-forward completion for testing"
-                >
-                  [Skip to End]
-                </button>
               </div>
             )}
           </div>
