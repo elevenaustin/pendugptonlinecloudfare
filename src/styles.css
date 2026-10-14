@@ -398,15 +398,17 @@
   background: linear-gradient(
     90deg,
     #009944 0%,
-    #00c853 20%,
-    #00f076 40%,
-    #b9ffd3 50%,
-    #00f076 60%,
-    #00c853 80%,
-    #009944 100%
+    #00c853 35%,
+    #00f076 75%,
+    #7bffb8 100%
   );
-  background-size: 200% 100%;
-  animation: waterFlow 1.8s linear infinite;
+  box-shadow: 0 0 12px rgba(0, 240, 118, 0.5);
+}
+
+@utility video-cinema-card {
+  background: #020503;
+  border: 1px solid rgba(0, 240, 118, 0.25);
+  box-shadow: 0 15px 40px -10px rgba(0, 0, 0, 0.9), 0 0 30px rgba(0, 240, 118, 0.16);
 }
 
 @media (prefers-reduced-motion: reduce) {

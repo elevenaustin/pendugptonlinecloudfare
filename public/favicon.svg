@@ -1,37 +1,70 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <radialGradient id="bgGrad" cx="50%" cy="30%" r="75%">
-      <stop offset="0%" stop-color="#0a1a11" />
-      <stop offset="50%" stop-color="#040906" />
-      <stop offset="100%" stop-color="#010302" />
-    </radialGradient>
-    <linearGradient id="neonEmerald" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#34FF9D" />
-      <stop offset="50%" stop-color="#00F076" />
+    <!-- Background Gradient: Deep Obsidian Emerald -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#071b11" />
+      <stop offset="50%" stop-color="#020805" />
+      <stop offset="100%" stop-color="#000402" />
+    </linearGradient>
+
+    <!-- Border Ring Gradient: Neon Emerald to Lime -->
+    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00F076" />
+      <stop offset="50%" stop-color="#00D668" stop-opacity="0.4" />
+      <stop offset="100%" stop-color="#CCFF00" />
+    </linearGradient>
+
+    <!-- High-Impact Brand Glyph Gradient -->
+    <linearGradient id="glyphGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#CCFF00" />
+      <stop offset="45%" stop-color="#00F076" />
       <stop offset="100%" stop-color="#00C853" />
     </linearGradient>
-    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#00F076" stop-opacity="0.9" />
-      <stop offset="50%" stop-color="#00F076" stop-opacity="0.2" />
-      <stop offset="100%" stop-color="#34FF9D" stop-opacity="0.8" />
-    </linearGradient>
-    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="3.5" result="blur" />
-      <feMerge>
-        <feMergeNode in="blur" />
-        <feMergeNode in="SourceGraphic" />
-      </feMerge>
+
+    <!-- Subtle Crisp Drop Shadow (No heavy blur to keep it 100% sharp at 16x16) -->
+    <filter id="crispGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#00F076" flood-opacity="0.6" />
     </filter>
   </defs>
-  <rect x="4" y="4" width="120" height="120" rx="32" fill="url(#bgGrad)" stroke="url(#borderGrad)" stroke-width="2.5" />
-  <path d="M24 64 L40 64 L48 48 L80 48 L88 64 L104 64" fill="none" stroke="#00F076" stroke-opacity="0.15" stroke-width="1.5" />
-  <path d="M36 96 L48 84 L80 84 L92 96" fill="none" stroke="#00F076" stroke-opacity="0.12" stroke-width="1.5" />
-  <g filter="url(#neonGlow)">
-    <rect x="36" y="28" width="14" height="72" rx="7" fill="url(#neonEmerald)" />
-    <path d="M42 28 H72 C86 28 96 38 96 52 C96 66 86 76 72 76 H42" fill="none" stroke="url(#neonEmerald)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" />
-    <circle cx="68" cy="52" r="5" fill="#FFFFFF" />
-    <circle cx="68" cy="52" r="8" fill="#34FF9D" fill-opacity="0.4" />
-    <circle cx="96" cy="52" r="3.5" fill="#34FF9D" />
-    <circle cx="36" cy="100" r="3.5" fill="#34FF9D" />
+
+  <!-- Squircle Base Frame -->
+  <rect
+    x="4"
+    y="4"
+    width="120"
+    height="120"
+    rx="32"
+    fill="url(#bgGrad)"
+    stroke="url(#borderGrad)"
+    stroke-width="3.5"
+  />
+
+  <!-- Subtle Inner Grid / Tech Accent -->
+  <circle cx="64" cy="64" r="50" fill="none" stroke="#00F076" stroke-opacity="0.08" stroke-width="1.5" stroke-dasharray="4 6" />
+
+  <!-- Iconic Brand "P" Symbol with AI Neural Sparkle -->
+  <g filter="url(#crispGlow)">
+    <!-- Vertical Pillar of 'P' -->
+    <rect x="32" y="24" width="18" height="80" rx="9" fill="url(#glyphGrad)" />
+
+    <!-- Upper Loop of 'P' -->
+    <path
+      d="M38 24 H76 C91.464 24 104 36.536 104 52 C104 67.464 91.464 80 76 80 H38"
+      fill="none"
+      stroke="url(#glyphGrad)"
+      stroke-width="18"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <!-- Inner Core Dot (High Contrast White / Lime) -->
+    <circle cx="74" cy="52" r="7" fill="#FFFFFF" />
+    <circle cx="74" cy="52" r="11" fill="#CCFF00" fill-opacity="0.35" />
+
+    <!-- 4-Point AI Sparkle Star on Top-Right -->
+    <path
+      d="M102 18 C102 24 106 28 112 28 C106 28 102 32 102 38 C102 32 98 28 92 28 C98 28 102 24 102 18 Z"
+      fill="#CCFF00"
+    />
   </g>
 </svg>

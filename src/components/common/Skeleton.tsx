@@ -57,6 +57,24 @@ export function RegistrationSkeleton() {
 }
 
 /**
+ * Instant Video Player Skeleton for sub-second visual readiness.
+ */
+export function VideoPlayerSkeleton({ className = "" }: { className?: string }) {
+  return (
+    <div className={`relative aspect-video w-full rounded-xl sm:rounded-2xl bg-[#030906] border border-[#00F076]/20 overflow-hidden flex flex-col items-center justify-center p-6 ${className}`}>
+      <div className="relative mb-3 flex items-center justify-center">
+        <div className="absolute -inset-2 rounded-full bg-[#00F076]/15 blur-sm animate-pulse" />
+        <div className="relative grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-full bg-[#072416] border border-[#00F076]/40 text-[#00F076] shadow-[0_0_20px_rgba(0,240,118,0.25)]">
+          <div className="h-6 w-6 sm:h-8 sm:w-8 rounded-sm bg-[#00F076]/40" />
+        </div>
+      </div>
+      <Skeleton className="h-4 w-44 rounded-md mb-2" />
+      <Skeleton className="h-3 w-32 rounded-full" />
+    </div>
+  );
+}
+
+/**
  * Full Skeleton Screen for the Free Training Screen (Route: /training)
  */
 export function TrainingSkeleton() {
@@ -82,28 +100,28 @@ export function TrainingSkeleton() {
         </div>
 
         {/* 16:9 Video Container Skeleton */}
-        <div className="rounded-[24px] sm:rounded-[32px] glass-card p-2 sm:p-4 mb-6">
-          <div className="relative aspect-video w-full rounded-xl sm:rounded-2xl skeleton-shimmer flex items-center justify-center">
-            <div className="h-16 w-16 sm:h-20 sm:w-20 rounded-full bg-[#00F076]/20 border border-[#00F076]/40 flex items-center justify-center">
-              <div className="h-7 w-7 rounded-md bg-[#00F076]/40" />
-            </div>
-          </div>
+        <div className="rounded-[22px] sm:rounded-[28px] border border-[#00F076]/20 bg-[#030906] p-1.5 sm:p-3 mb-6 shadow-xl">
+          <VideoPlayerSkeleton />
         </div>
 
         {/* Progress Gate Card Skeleton */}
-        <div className="rounded-[24px] glass-card p-5 sm:p-6 mb-6">
+        <div className="rounded-[24px] sm:rounded-[28px] border border-[#00F076]/20 bg-[#05140b]/90 p-5 sm:p-7 mb-6">
           <div className="flex justify-between items-center mb-3">
-            <Skeleton className="h-4 w-32 rounded-md" />
-            <Skeleton className="h-5 w-20 rounded-full" />
+            <Skeleton className="h-5 w-36 rounded-md" />
+            <Skeleton className="h-6 w-24 rounded-full" />
           </div>
-          <Skeleton className="h-3 w-full rounded-full" />
+          <Skeleton className="h-3.5 w-full rounded-full mb-4" />
+          <div className="flex justify-between items-center pt-3 border-t border-white/5">
+            <Skeleton className="h-5 w-48 rounded-md" />
+            <Skeleton className="h-9 w-32 rounded-full" />
+          </div>
         </div>
 
         {/* 3 Trust Cards Skeleton */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
-          <Skeleton className="h-20 w-full rounded-2xl" />
+          <Skeleton className="h-24 w-full rounded-2xl" />
+          <Skeleton className="h-24 w-full rounded-2xl" />
+          <Skeleton className="h-24 w-full rounded-2xl" />
         </div>
       </main>
 

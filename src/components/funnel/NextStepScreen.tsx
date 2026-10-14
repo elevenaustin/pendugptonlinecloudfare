@@ -75,38 +75,9 @@ export function NextStepScreen() {
 
   const pricingSectionRef = useRef<HTMLDivElement>(null);
 
-  // Strict Funnel Guard + Secret Tester Link Bypass:
-  // Secret testing links supported: ?preview=true, ?test=true, ?secret=pendu, ?bypass=true
+  // Strict Funnel Guard: User must have completed registration AND watched 95%+ of the video
   useEffect(() => {
     try {
-      if (typeof window !== "undefined") {
-        const searchParams = new URLSearchParams(window.location.search);
-        const hasSecretBypass =
-          searchParams.has("test") ||
-          searchParams.has("preview") ||
-          searchParams.has("secret") ||
-          searchParams.has("bypass") ||
-          searchParams.has("demo") ||
-          localStorage.getItem("pendugpt_secret_bypass") === "true";
-
-        if (hasSecretBypass) {
-          try {
-            localStorage.setItem(
-              siteConfig.video.registrationKey,
-              JSON.stringify({ whatsapp: "", registered: true, isTester: true }),
-            );
-            localStorage.setItem(siteConfig.video.completionKey, "true");
-            localStorage.setItem("pendugpt_secret_bypass", "true");
-          } catch {
-            /* ignore */
-          }
-          setIsAuthorized(true);
-          setIsMounted(true);
-          loadRazorpayScript().catch(() => {});
-          return;
-        }
-      }
-
       // 1. Check if user completed registration
       const reg = JSON.parse(localStorage.getItem(siteConfig.video.registrationKey) || "null");
       if (!reg || !reg.registered) {
@@ -115,9 +86,20 @@ export function NextStepScreen() {
         return;
       }
 
-      // 2. Check if user completed masterclass training video
+      // Check if user is a designated tester from the dedicated /secret-test route only
+      if (reg.isTester) {
+        setIsAuthorized(true);
+        setIsMounted(true);
+        loadRazorpayScript().catch(() => {});
+        return;
+      }
+
+      // 2. Strict Check: User must have genuinely completed masterclass training video (>= 95%)
       const isCompleted = localStorage.getItem(siteConfig.video.completionKey) === "true";
-      if (!isCompleted) {
+      const saved = JSON.parse(localStorage.getItem(siteConfig.video.storageKey) || "null");
+      const progressValue = typeof saved?.progress === "number" ? saved.progress : 0;
+
+      if (!isCompleted || progressValue < siteConfig.video.completionThreshold) {
         setIsAuthorized(false);
         navigate({ to: "/training" });
         return;
@@ -473,22 +455,22 @@ export function NextStepScreen() {
 
           {/* Video Preview Section (Clean, Cinema-Grade Player with Zero Clutter & Zero Vimeo Icons) */}
           <div className="relative group/player mx-auto max-w-3xl w-full">
-              {/* Radiant Ambient Glow Behind Video */}
-              <div className="pointer-events-none absolute -inset-2 sm:-inset-3 rounded-[32px] sm:rounded-[40px] bg-gradient-to-r from-[#00F076]/30 via-[#00D668]/20 to-[#00F076]/30 blur-2xl opacity-75 group-hover/player:opacity-100 transition-opacity duration-500" />
+            {/* Lightweight Static Glow (Zero Repaint Lag) */}
+            <div className="pointer-events-none absolute -inset-1 rounded-[24px] sm:rounded-[32px] bg-[#00F076]/10 opacity-70 transition-opacity duration-300" />
 
-              <div
-                ref={videoContainerRef}
-                onMouseMove={handleUserActivity}
-                onTouchStart={handleUserActivity}
-                onTouchMove={handleUserActivity}
-                onClick={handleUserActivity}
-                onMouseLeave={() => isPlaying && setShowControls(false)}
-                className={`relative overflow-hidden transition-all duration-300 select-none touch-manipulation ${
-                  isFullscreen
-                    ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex items-center justify-center p-0 rounded-none"
-                    : "rounded-[20px] xs:rounded-[26px] sm:rounded-[32px] glass-card p-1.5 xs:p-2.5 sm:p-4 md:p-5 border-2 border-[#00F076]/40 shadow-[0_0_60px_rgba(0,240,118,0.25)]"
-                }`}
-              >
+            <div
+              ref={videoContainerRef}
+              onMouseMove={handleUserActivity}
+              onTouchStart={handleUserActivity}
+              onTouchMove={handleUserActivity}
+              onClick={handleUserActivity}
+              onMouseLeave={() => isPlaying && setShowControls(false)}
+              className={`relative overflow-hidden transition-all duration-300 select-none touch-manipulation ${
+                isFullscreen
+                  ? "fixed inset-0 z-[99999] w-screen h-screen bg-black flex items-center justify-center p-0 rounded-none"
+                  : "rounded-[22px] sm:rounded-[28px] border border-[#00F076]/30 bg-[#030906] p-1.5 sm:p-3 shadow-[0_15px_40px_-10px_rgba(0,0,0,0.9),0_0_30px_rgba(0,240,118,0.18)]"
+              }`}
+            >
                 {/* Quick Exit Fullscreen Button on Top Right in Fullscreen Mode */}
                 {isFullscreen && (
                   <button

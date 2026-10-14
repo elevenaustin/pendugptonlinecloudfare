@@ -8,10 +8,10 @@ function SecretTestWrapper() {
     try {
       localStorage.setItem(
         siteConfig.video.registrationKey,
-        JSON.stringify({ whatsapp: "", registered: true, isTester: true }),
+        JSON.stringify({ whatsapp: "9999999999", registered: true, isTester: true }),
       );
-      localStorage.setItem(siteConfig.video.completionKey, "true");
-      localStorage.setItem("pendugpt_secret_bypass", "true");
+      // Clean up any stale bypass flags
+      localStorage.removeItem("pendugpt_secret_bypass");
     } catch {
       /* ignore */
     }
