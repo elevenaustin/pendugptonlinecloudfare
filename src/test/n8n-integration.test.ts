@@ -10,6 +10,9 @@ import {
   processVideoCompletionEvent,
   recordLeadVideoActivity,
   getRemoteLeadProgress,
+  sendN8nVideoInactivityWebhook,
+  processVideoInactivityEvent,
+  maskPhone,
   CAMPAIGN_NAME,
 } from "@/lib/n8n.server";
 
@@ -1479,6 +1482,356 @@ describe("n8n WhatsApp Follow-up & Leads Integration", () => {
       expect(res.progress).toBeDefined();
       expect(res.progress?.lastPosition).toBe(412);
       expect(res.progress?.isCompleted).toBe(false);
+    });
+  });
+
+  describe("Video Inactivity Comeback (n8n Inactivity Webhook)", () => {
+    describe("maskPhone helper", () => {
+      it("masks phone numbers securely without leaking full digits", () => {
+        expect(maskPhone("+919817337782")).toBe("+91****782");
+        expect(maskPhone("9817337782")).toBe("981****782");
+        expect(maskPhone("123")).toBe("****");
+        expect(maskPhone("")).toBe("");
+        expect(maskPhone(null as any)).toBe("");
+      });
+    });
+
+    describe("sendN8nVideoInactivityWebhook", () => {
+      it("dispatches POST request with exact required schema and x-pendugpt-webhook-secret header", async () => {
+        let sentUrl = "";
+        let sentOptions: any = null;
+
+        const originalUrl = process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_URL"];
+        const originalSecret = process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"];
+
+        process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_URL"] =
+          "https://pendugptonline.app.n8n.cloud/webhook/pendugpt-video-inactivity-v2";
+        process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"] = "test-secret-inactivity-123";
+
+        global.fetch = vi.fn().mockImplementation((url, options) => {
+          sentUrl = url.toString();
+          sentOptions = options;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ message: "Inactivity event received" }),
+          });
+        });
+
+        const testPayload = {
+          lead_id: "lead-real-uuid-111",
+          phone: "+919817337782",
+          video_id: "1231615906",
+          watch_seconds: 180,
+          updated_at: new Date().toISOString(),
+        };
+
+        const res = await sendN8nVideoInactivityWebhook(testPayload);
+
+        expect(res.ok).toBe(true);
+        expect(sentUrl).toBe("https://pendugptonline.app.n8n.cloud/webhook/pendugpt-video-inactivity-v2");
+        expect(sentOptions.method).toBe("POST");
+        expect(sentOptions.headers["Content-Type"]).toBe("application/json");
+        expect(sentOptions.headers["x-pendugpt-webhook-secret"]).toBe("test-secret-inactivity-123");
+
+        const parsedBody = JSON.parse(sentOptions.body);
+        expect(parsedBody.lead_id).toBe("lead-real-uuid-111");
+        expect(parsedBody.phone).toBe("+919817337782");
+        expect(parsedBody.video_id).toBe("1231615906");
+        expect(parsedBody.watch_seconds).toBe(180);
+        expect(parsedBody.updated_at).toBe(testPayload.updated_at);
+
+        if (originalUrl) process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_URL"] = originalUrl;
+        else delete process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_URL"];
+        if (originalSecret) process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"] = originalSecret;
+        else delete process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"];
+      });
+
+      it("does not include secret header when N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET is not configured", async () => {
+        let sentHeaders: any = null;
+        const originalSecret = process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"];
+        delete process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"];
+
+        global.fetch = vi.fn().mockImplementation((_url, options) => {
+          sentHeaders = options.headers;
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ success: true }),
+          });
+        });
+
+        await sendN8nVideoInactivityWebhook({
+          lead_id: "lead-1",
+          phone: "+919817337782",
+          video_id: "1231615906",
+          watch_seconds: 60,
+          updated_at: new Date().toISOString(),
+        });
+
+        expect(sentHeaders["x-pendugpt-webhook-secret"]).toBeUndefined();
+
+        if (originalSecret) process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"] = originalSecret;
+      });
+
+      it("handles 500 server error and retries up to 2 times before returning failure", async () => {
+        let attempts = 0;
+        global.fetch = vi.fn().mockImplementation(() => {
+          attempts++;
+          return Promise.resolve({
+            ok: false,
+            status: 502,
+            text: async () => "Bad Gateway",
+          });
+        });
+
+        const res = await sendN8nVideoInactivityWebhook({
+          lead_id: "lead-err",
+          phone: "+919817337782",
+          video_id: "1231615906",
+          watch_seconds: 60,
+          updated_at: new Date().toISOString(),
+        });
+
+        expect(res.ok).toBe(false);
+        expect(res.status).toBe(500);
+        expect(attempts).toBe(2);
+      });
+    });
+
+    describe("processVideoInactivityEvent", () => {
+      it("rejects dispatch when both registrationId and phone are missing", async () => {
+        const res = await processVideoInactivityEvent({
+          registrationId: null,
+          phone: null,
+          videoId: "1231615906",
+        });
+
+        expect(res.ok).toBe(false);
+        expect(res.webhookSent).toBe(false);
+        expect(res.error).toContain("Missing");
+      });
+
+      it("rejects dispatch when student identity does not match database record", async () => {
+        const mockLead = {
+          id: "lead-real-alice",
+          phone: "9817337782",
+          watch_seconds: 120,
+          unlocked_class: false,
+          video_completed_at: null,
+          whatsapp_followup_status: "NOT_SENT",
+        };
+
+        const mockClient = {
+          from: (table: string) => {
+            if (table === "leads") {
+              return {
+                select: () => ({
+                  eq: (_col: string, _val: string) => ({
+                    maybeSingle: async () => ({ data: mockLead, error: null }),
+                  }),
+                }),
+              };
+            }
+            return {};
+          },
+        };
+
+        const res = await processVideoInactivityEvent({
+          registrationId: "lead-real-alice",
+          phone: "9999999999", // Spoofed / mismatched phone
+          videoId: "1231615906",
+          client: mockClient,
+        });
+
+        expect(res.ok).toBe(false);
+        expect(res.webhookSent).toBe(false);
+        expect(res.error).toBe("Student identity verification mismatch");
+      });
+
+      it("skips dispatch when video is already completed (unlocked_class = true)", async () => {
+        const mockLead = {
+          id: "lead-completed-1",
+          phone: "9817337782",
+          watch_seconds: 820,
+          unlocked_class: true,
+          video_completed_at: new Date().toISOString(),
+          whatsapp_followup_status: "NOT_SENT",
+        };
+
+        const mockClient = {
+          from: (table: string) => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: mockLead, error: null }),
+              }),
+            }),
+          }),
+        };
+
+        const res = await processVideoInactivityEvent({
+          registrationId: "lead-completed-1",
+          phone: "9817337782",
+          videoId: "1231615906",
+          lastPositionSeconds: 820,
+          client: mockClient,
+        });
+
+        expect(res.ok).toBe(true);
+        expect(res.webhookSent).toBe(false);
+        expect(res.deduplicated).toBe(true);
+        expect(res.reason).toBe("video_already_completed");
+      });
+
+      it("skips dispatch when watch time is negligible (< 15 seconds)", async () => {
+        const mockLead = {
+          id: "lead-barely-started",
+          phone: "9817337782",
+          watch_seconds: 8,
+          unlocked_class: false,
+          video_completed_at: null,
+          whatsapp_followup_status: "NOT_SENT",
+        };
+
+        const mockClient = {
+          from: (table: string) => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: mockLead, error: null }),
+              }),
+            }),
+          }),
+        };
+
+        const res = await processVideoInactivityEvent({
+          registrationId: "lead-barely-started",
+          phone: "9817337782",
+          videoId: "1231615906",
+          lastPositionSeconds: 8,
+          client: mockClient,
+        });
+
+        expect(res.ok).toBe(true);
+        expect(res.webhookSent).toBe(false);
+        expect(res.deduplicated).toBe(true);
+        expect(res.reason).toBe("insufficient_watch_time");
+      });
+
+      it("skips dispatch when student is already marked PAID or STOPPED", async () => {
+        const mockLead = {
+          id: "lead-paid-student",
+          phone: "9817337782",
+          watch_seconds: 250,
+          unlocked_class: false,
+          video_completed_at: null,
+          whatsapp_followup_status: "PAID",
+        };
+
+        const mockClient = {
+          from: (table: string) => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: mockLead, error: null }),
+              }),
+            }),
+          }),
+        };
+
+        const res = await processVideoInactivityEvent({
+          registrationId: "lead-paid-student",
+          phone: "9817337782",
+          videoId: "1231615906",
+          client: mockClient,
+        });
+
+        expect(res.ok).toBe(true);
+        expect(res.webhookSent).toBe(false);
+        expect(res.deduplicated).toBe(true);
+        expect(res.reason).toBe("lead_status_paid");
+      });
+
+      it("dispatches successfully for eligible inactive lead and deduplicates subsequent immediate calls", async () => {
+        const mockLead = {
+          id: "lead-pause-1",
+          phone: "9817337782",
+          watch_seconds: 145,
+          unlocked_class: false,
+          video_completed_at: null,
+          whatsapp_followup_status: "NOT_SENT",
+        };
+
+        let funnelEventInserted = false;
+        const mockClient = {
+          from: (table: string) => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: mockLead, error: null }),
+              }),
+            }),
+          }),
+        };
+
+        const mockAdmin = {
+          from: (table: string) => {
+            if (table === "funnel_events") {
+              return {
+                select: () => ({
+                  eq: () => ({
+                    eq: () => ({
+                      gte: () => ({
+                        maybeSingle: async () => ({ data: null, error: null }),
+                      }),
+                    }),
+                  }),
+                }),
+                insert: async () => {
+                  funnelEventInserted = true;
+                  return { error: null };
+                },
+              };
+            }
+            return {};
+          },
+        };
+
+        global.fetch = vi.fn().mockImplementation(() =>
+          Promise.resolve({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ success: true }),
+          }),
+        );
+
+        // First call: should successfully send webhook
+        const res1 = await processVideoInactivityEvent({
+          registrationId: "lead-pause-1",
+          phone: "9817337782",
+          videoId: "1231615906",
+          lastPositionSeconds: 145,
+          client: mockClient,
+          websiteClient: mockAdmin,
+        });
+
+        expect(res1.ok).toBe(true);
+        expect(res1.webhookSent).toBe(true);
+        expect(res1.leadId).toBe("lead-pause-1");
+        expect(funnelEventInserted).toBe(true);
+
+        // Immediate subsequent call (e.g. rapid pause/resume/pause): should deduplicate via cooldown
+        const res2 = await processVideoInactivityEvent({
+          registrationId: "lead-pause-1",
+          phone: "9817337782",
+          videoId: "1231615906",
+          lastPositionSeconds: 148,
+          client: mockClient,
+          websiteClient: mockAdmin,
+        });
+
+        expect(res2.ok).toBe(true);
+        expect(res2.webhookSent).toBe(false);
+        expect(res2.deduplicated).toBe(true);
+        expect(res2.reason).toBe("inactivity_cooldown_active");
+      });
     });
   });
 });

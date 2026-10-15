@@ -320,3 +320,62 @@ export const verifyNextStepAccess = createServerFn({ method: "POST" })
       return { authorized: false, reason: "server_verification_error", watchedSeconds: 0 };
     }
   });
+
+export const videoInactivitySchema = z.object({
+  registrationId: z.string().uuid().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  videoId: z.string().min(1),
+  lastPositionSeconds: z.number().min(0).optional(),
+  reason: z.enum(["pause", "pagehide", "visibilitychange", "manual"]).optional(),
+});
+
+export type VideoInactivityInput = z.infer<typeof videoInactivitySchema>;
+
+/**
+ * Server function to report playback pause or abandonment for inactivity reminders.
+ * Primary store: public.leads in the Landing Page Supabase (gifxzzrbpukpxsvmhokj).
+ * Dispatches to production n8n webhook only on genuine pause/exit when video is incomplete.
+ */
+export const reportVideoInactivity = createServerFn({ method: "POST" })
+  .validator((data: unknown) => videoInactivitySchema.parse(data))
+  .handler(async ({ data }) => {
+    if (!data.registrationId && !data.phone) {
+      return { ok: true, reported: false, reason: "anonymous_session" };
+    }
+
+    try {
+      // 1. Record latest activity timestamp & position in public.leads first
+      if (typeof data.lastPositionSeconds === "number") {
+        const { recordLeadVideoActivity } = await import("./n8n.server");
+        await recordLeadVideoActivity({
+          registrationId: data.registrationId ?? null,
+          phone: data.phone ?? null,
+          watchSeconds: data.lastPositionSeconds,
+          isCompleted: false,
+        });
+      }
+
+      // 2. Process inactivity event and dispatch to n8n if eligible
+      const { processVideoInactivityEvent } = await import("./n8n.server");
+      const result = await processVideoInactivityEvent({
+        registrationId: data.registrationId ?? null,
+        phone: data.phone ?? null,
+        videoId: data.videoId,
+        lastPositionSeconds: data.lastPositionSeconds,
+        reason: data.reason,
+      });
+
+      return {
+        ok: result.ok,
+        reported: result.webhookSent,
+        leadId: result.leadId,
+        deduplicated: result.deduplicated,
+        reason: result.reason,
+        error: result.error,
+      };
+    } catch (err: any) {
+      console.warn("[video.functions] reportVideoInactivity notice:", err?.message);
+      return { ok: false, reported: false, error: err?.message || String(err) };
+    }
+  });
+

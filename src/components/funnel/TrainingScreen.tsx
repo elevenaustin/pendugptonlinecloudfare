@@ -23,12 +23,13 @@ import { siteConfig } from "@/config/site";
 import { track } from "@/lib/analytics";
 import { BrandLogo } from "@/components/common/BrandLogo";
 import { TrainingSkeleton, VideoPlayerSkeleton } from "@/components/common/Skeleton";
-import { saveVideoProgress, fetchRemoteVideoProgress } from "@/lib/video.functions";
+import { saveVideoProgress, fetchRemoteVideoProgress, reportVideoInactivity } from "@/lib/video.functions";
 
 export function TrainingScreen() {
   const navigate = useNavigate();
   const saveRemoteProgress = useServerFn(saveVideoProgress);
   const fetchRemoteProgress = useServerFn(fetchRemoteVideoProgress);
+  const reportInactivity = useServerFn(reportVideoInactivity);
 
   const { vimeoId, completionThreshold, storageKey, completionKey, registrationKey } =
     siteConfig.video;
@@ -41,6 +42,7 @@ export function TrainingScreen() {
   const durationRef = useRef(0);
   const lastRemoteSavePosRef = useRef(0);
   const lastRemoteSaveTimeRef = useRef(0);
+  const lastInactivityDispatchTimeRef = useRef(0);
   const isSavingRemoteRef = useRef(false);
   const lastTimeCheckRef = useRef<number>(Date.now());
   const registrationIdRef = useRef<string | null>(null);
@@ -235,25 +237,59 @@ export function TrainingScreen() {
     }
   };
 
+  const triggerInactivityNotification = useCallback(
+    (reason: "pause" | "visibilitychange" | "pagehide") => {
+      const regId = registrationIdRef.current;
+      if (!regId && !userPhoneRef.current) return;
+      const currentPos = lastPositionRef.current || watchedRef.current;
+      // Meaningful progress guard: only notify if watched >= 15s and < 815s (incomplete)
+      if (isCompleted || currentPos < 15 || currentPos >= 815) return;
+
+      const now = Date.now();
+      // Client-side debounce: at least 60 seconds between trigger attempts from this browser tab
+      if (now - lastInactivityDispatchTimeRef.current < 60000) return;
+      lastInactivityDispatchTimeRef.current = now;
+
+      reportInactivity({
+        data: {
+          registrationId: regId,
+          phone: userPhoneRef.current,
+          videoId: vimeoId,
+          lastPositionSeconds: currentPos,
+          reason,
+        },
+      }).catch((err) => {
+        console.warn("[TrainingScreen] Inactivity event notice:", err);
+      });
+    },
+    [isCompleted, reportInactivity, vimeoId],
+  );
+
   // Synchronize on page exit / tab switch
   useEffect(() => {
-    const handlePageExit = () => {
+    const handlePageExit = (reason: "pagehide" | "visibilitychange" = "pagehide") => {
       persist(progress, isCompleted, lastPositionRef.current, true);
+      triggerInactivityNotification(reason);
     };
 
-    window.addEventListener("beforeunload", handlePageExit);
-    window.addEventListener("pagehide", handlePageExit);
-    document.addEventListener("visibilitychange", () => {
+    const onBeforeUnload = () => handlePageExit("pagehide");
+    const onPageHide = () => handlePageExit("pagehide");
+    const onVisibilityChange = () => {
       if (document.visibilityState === "hidden") {
-        handlePageExit();
+        handlePageExit("visibilitychange");
       }
-    });
+    };
+
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", onPageHide);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
-      window.removeEventListener("beforeunload", handlePageExit);
-      window.removeEventListener("pagehide", handlePageExit);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", onPageHide);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [progress, isCompleted]);
+  }, [progress, isCompleted, triggerInactivityNotification]);
 
   const handleCompletion = (force = false) => {
     const duration = durationRef.current || 0;
@@ -394,6 +430,7 @@ export function TrainingScreen() {
         try {
           const cur = await player.getCurrentTime();
           persist(progress, isCompleted, cur, true);
+          triggerInactivityNotification("pause");
         } catch {
           /* ignore */
         }

@@ -1304,4 +1304,296 @@ export async function retryVideoCompletion({
   });
 }
 
+export interface InactivityWebhookPayload {
+  lead_id: string;
+  phone: string;
+  video_id: string;
+  watch_seconds: number;
+  updated_at: string;
+}
+
+export interface InactivityWebhookResult {
+  ok: boolean;
+  leadId: string | null;
+  webhookSent: boolean;
+  status?: number;
+  error?: string;
+  deduplicated?: boolean;
+  reason?: string;
+}
+
+/**
+ * Masks phone number for secure logging (e.g. +91 98173 37782 -> +91 981****782).
+ */
+export function maskPhone(phone?: string | null): string {
+  if (!phone) return "";
+  const clean = phone.trim();
+  if (clean.length <= 4) return "****";
+  return clean.slice(0, 3) + "****" + clean.slice(-3);
+}
+
+// In-memory cache for recent inactivity dispatches (leadId -> timestamp ms)
+const recentInactivityDispatches = new Map<string, number>();
+const INACTIVITY_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes cooldown per lead
+
+/**
+ * Dispatches an authenticated HTTP POST request to the n8n Video Inactivity Webhook endpoint.
+ * Uses server-only N8N_VIDEO_INACTIVITY_WEBHOOK_URL and N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET.
+ * Header Auth: 'x-pendugpt-webhook-secret: <secret>'
+ */
+export async function sendN8nVideoInactivityWebhook(
+  payload: InactivityWebhookPayload,
+): Promise<{
+  ok: boolean;
+  status: number;
+  body: string;
+  error?: string;
+}> {
+  const webhookUrl =
+    process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_URL"] ||
+    "https://pendugptonline.app.n8n.cloud/webhook/pendugpt-video-inactivity-v2";
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  const webhookSecret = process.env["N8N_VIDEO_INACTIVITY_WEBHOOK_SECRET"];
+  if (webhookSecret) {
+    headers["x-pendugpt-webhook-secret"] = webhookSecret;
+  }
+
+  console.info(
+    `[n8n.server] Dispatching video_inactivity event for lead: ${payload.lead_id} (contact: ${maskPhone(payload.phone)})`,
+  );
+
+  let lastError: any = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetch(webhookUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(8000),
+      });
+
+      const text = await res.text();
+
+      if (res.ok) {
+        return { ok: true, status: res.status, body: text };
+      }
+
+      if (res.status >= 400 && res.status < 500) {
+        return { ok: false, status: res.status, body: text, error: `HTTP ${res.status}: ${text}` };
+      }
+
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    } catch (err: any) {
+      lastError = err;
+      if (attempt < 2) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    }
+  }
+
+  return {
+    ok: false,
+    status: 500,
+    body: lastError?.message || "Inactivity webhook request failed",
+    error: lastError?.message || "Request timed out or network error",
+  };
+}
+
+/**
+ * Processes video inactivity events on meaningful transitions (pause, page exit, hidden tab):
+ * 1. Resolves and validates student lead from Landing Page public.leads.
+ * 2. Enforces student identity binding (registrationId vs phone).
+ * 3. Rejects if video is already completed (watch_seconds >= 815 or unlocked_class).
+ * 4. Rejects if watch time is negligible (< 15 seconds).
+ * 5. Enforces 15-minute inactivity cooldown / deduplication.
+ * 6. Dispatches verified payload with canonical phone from database to n8n.
+ * 7. Logs funnel event on successful dispatch.
+ */
+export async function processVideoInactivityEvent({
+  registrationId,
+  phone,
+  videoId = "1231615906",
+  lastPositionSeconds,
+  reason: _reason = "pause",
+  client,
+  websiteClient,
+}: {
+  registrationId?: string | null;
+  phone?: string | null;
+  videoId?: string;
+  lastPositionSeconds?: number;
+  reason?: string;
+  client?: any;
+  websiteClient?: any;
+}): Promise<InactivityWebhookResult> {
+  if (!registrationId && !phone) {
+    return { ok: false, leadId: null, webhookSent: false, error: "Missing student registrationId and phone" };
+  }
+
+  const leadsClient = client || getLeadsSupabaseClient();
+  let lead: any = null;
+
+  // 1. Primary lookup by registrationId
+  if (registrationId) {
+    const { data: byId } = await leadsClient
+      .from("leads")
+      .select("id, phone, watch_seconds, unlocked_class, video_completed_at, video_last_activity_at, whatsapp_followup_status")
+      .eq("id", registrationId)
+      .maybeSingle();
+    if (byId) lead = byId;
+  }
+
+  // 2. Secondary lookup by clean phone if not matched by ID
+  if (!lead && phone) {
+    const cleanPhone = formatCleanPhone(phone);
+    if (cleanPhone) {
+      const { data: byPhone } = await leadsClient
+        .from("leads")
+        .select("id, phone, watch_seconds, unlocked_class, video_completed_at, video_last_activity_at, whatsapp_followup_status")
+        .eq("phone", cleanPhone)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (byPhone) lead = byPhone;
+    }
+  }
+
+  if (!lead) {
+    return { ok: false, leadId: null, webhookSent: false, error: "Lead record not found in Landing Page database" };
+  }
+
+  // 3. Student Identity Binding Verification
+  if (phone && lead.phone) {
+    const cleanInputPhone = formatCleanPhone(phone);
+    const cleanLeadPhone = formatCleanPhone(lead.phone);
+    if (cleanInputPhone && cleanLeadPhone && cleanInputPhone !== cleanLeadPhone) {
+      console.warn(
+        `[Security] Inactivity identity mismatch: registrationId ${registrationId} does not match phone ${phone}`,
+      );
+      return { ok: false, leadId: lead.id, webhookSent: false, error: "Student identity verification mismatch" };
+    }
+  }
+
+  // 4. Exclude completed videos, unlocked classes, or opted-out leads
+  const leadWatchSeconds = Number(lead.watch_seconds) || 0;
+  const isCompleted = Boolean(lead.unlocked_class || lead.video_completed_at || leadWatchSeconds >= 815);
+  if (isCompleted) {
+    return {
+      ok: true,
+      leadId: lead.id,
+      webhookSent: false,
+      deduplicated: true,
+      reason: "video_already_completed",
+    };
+  }
+
+  // Exclude negligible watch time (< 15 seconds)
+  const effectiveWatchSeconds = Math.max(leadWatchSeconds, Math.round(lastPositionSeconds || 0));
+  if (effectiveWatchSeconds < 15) {
+    return {
+      ok: true,
+      leadId: lead.id,
+      webhookSent: false,
+      deduplicated: true,
+      reason: "insufficient_watch_time",
+    };
+  }
+
+  // Respect follow-up status (PAID or STOPPED)
+  if (lead.whatsapp_followup_status === "PAID" || lead.whatsapp_followup_status === "STOPPED") {
+    return {
+      ok: true,
+      leadId: lead.id,
+      webhookSent: false,
+      deduplicated: true,
+      reason: `lead_status_${lead.whatsapp_followup_status.toLowerCase()}`,
+    };
+  }
+
+  // 5. Inactivity Cooldown / Deduplication (15 minutes per lead)
+  const lastSent = recentInactivityDispatches.get(lead.id);
+  if (lastSent && Date.now() - lastSent < INACTIVITY_COOLDOWN_MS) {
+    return {
+      ok: true,
+      leadId: lead.id,
+      webhookSent: false,
+      deduplicated: true,
+      reason: "inactivity_cooldown_active",
+    };
+  }
+
+  // Check persistent funnel_events if available
+  const adminClient =
+    websiteClient || (await import("@/integrations/supabase/client.server")).supabaseAdmin;
+  try {
+    const fifteenMinutesAgo = new Date(Date.now() - INACTIVITY_COOLDOWN_MS).toISOString();
+    const { data: recentEvent } = await adminClient
+      .from("funnel_events")
+      .select("id")
+      .eq("registration_id", lead.id)
+      .eq("event_name", "n8n_video_inactivity_sent")
+      .gte("created_at", fifteenMinutesAgo)
+      .maybeSingle();
+
+    if (recentEvent?.id) {
+      recentInactivityDispatches.set(lead.id, Date.now());
+      return {
+        ok: true,
+        leadId: lead.id,
+        webhookSent: false,
+        deduplicated: true,
+        reason: "funnel_event_cooldown_active",
+      };
+    }
+  } catch {
+    /* funnel_events lookup is optional fallback */
+  }
+
+  // 6. Build minimum required payload using canonical database phone
+  const canonicalPhone = formatCleanPhone(lead.phone) || lead.phone;
+  const payload: InactivityWebhookPayload = {
+    lead_id: lead.id,
+    phone: canonicalPhone,
+    video_id: videoId,
+    watch_seconds: effectiveWatchSeconds,
+    updated_at: new Date().toISOString(),
+  };
+
+  // 7. Dispatch to n8n production webhook
+  const webhookRes = await sendN8nVideoInactivityWebhook(payload);
+
+  if (webhookRes.ok) {
+    recentInactivityDispatches.set(lead.id, Date.now());
+    try {
+      await adminClient.from("funnel_events").insert({
+        registration_id: lead.id,
+        event_name: "n8n_video_inactivity_sent",
+      });
+    } catch {
+      /* ignore optional logging error */
+    }
+
+    return {
+      ok: true,
+      leadId: lead.id,
+      webhookSent: true,
+      deduplicated: false,
+      status: webhookRes.status,
+    };
+  }
+
+  return {
+    ok: false,
+    leadId: lead.id,
+    webhookSent: false,
+    status: webhookRes.status,
+    error: webhookRes.error || webhookRes.body,
+  };
+}
 
