@@ -120,15 +120,17 @@ export const CRM_DEFAULT_KEY =
  */
 export function getLeadsSupabaseClient() {
   const url =
-    process.env.LEADS_SUPABASE_URL ||
-    process.env.CRM_SUPABASE_URL ||
+    process.env["LEADS_SUPABASE_URL"] ||
+    process.env["SUPABASE_URL"] ||
+    process.env["CRM_SUPABASE_URL"] ||
     CRM_DEFAULT_URL;
 
   const key =
-    process.env.LEADS_SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.CRM_SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.LEADS_SUPABASE_ANON_KEY ||
-    process.env.CRM_SUPABASE_ANON_KEY ||
+    process.env["LEADS_SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["CRM_SUPABASE_SERVICE_ROLE_KEY"] ||
+    process.env["LEADS_SUPABASE_ANON_KEY"] ||
+    process.env["CRM_SUPABASE_ANON_KEY"] ||
     CRM_DEFAULT_KEY;
 
   return createClient(url, key, {
