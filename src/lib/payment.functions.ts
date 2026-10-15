@@ -42,6 +42,24 @@ export const createRazorpayOrder = createServerFn({ method: "POST" })
       const secretKey =
         process.env.RAZORPAY_KEY_SECRET || "1ofBzwOCAqLPn7M6iQG616hx";
 
+      // Security Check: Verify student completed >= 95% (815s) of training before allowing order creation
+      const { verifyNextStepAccess } = await import("./video.functions");
+      const authCheck = await verifyNextStepAccess({
+        data: {
+          registrationId: data.registrationId || null,
+          phone: data.phone || null,
+        },
+      });
+
+      if (!authCheck.authorized) {
+        return {
+          ok: false,
+          error: "Enrollment is locked. You must complete at least 95% of the Masterclass training video before enrolling.",
+          orderId: undefined,
+          keyId: keyId,
+        };
+      }
+
       const auth = Buffer.from(`${keyId}:${secretKey}`).toString("base64");
       const receipt = `rcpt_${data.track}_${Date.now()}`.slice(0, 40);
 
@@ -360,6 +378,7 @@ export const syncRazorpayPayments = createServerFn({ method: "POST" })
         siteConfig.razorpay.keyId;
       const secretKey =
         process.env.RAZORPAY_KEY_SECRET || "1ofBzwOCAqLPn7M6iQG616hx";
+      const auth = Buffer.from(`${keyId}:${secretKey}`).toString("base64");
 
       // Fetch existing landing page orders that need reconciliation
       const { data: existingOrders, error: fetchErr } = await supabaseAdmin

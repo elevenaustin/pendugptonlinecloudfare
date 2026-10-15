@@ -12,7 +12,6 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as NextStepRouteImport } from './routes/next-step'
-import { Route as SecretTestRouteImport } from './routes/secret-test'
 import { Route as TrainingRouteImport } from './routes/training'
 
 const IndexRoute = IndexRouteImport.update({
@@ -30,11 +29,6 @@ const NextStepRoute = NextStepRouteImport.update({
   path: '/next-step',
   getParentRoute: () => rootRouteImport,
 } as any)
-const SecretTestRoute = SecretTestRouteImport.update({
-  id: '/secret-test',
-  path: '/secret-test',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const TrainingRoute = TrainingRouteImport.update({
   id: '/training',
   path: '/training',
@@ -45,14 +39,12 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/next-step': typeof NextStepRoute
-  '/secret-test': typeof SecretTestRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/next-step': typeof NextStepRoute
-  '/secret-test': typeof SecretTestRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRoutesById {
@@ -60,22 +52,20 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/next-step': typeof NextStepRoute
-  '/secret-test': typeof SecretTestRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/next-step' | '/secret-test' | '/training'
+  fullPaths: '/' | '/admin' | '/next-step' | '/training'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/next-step' | '/secret-test' | '/training'
-  id: '__root__' | '/' | '/admin' | '/next-step' | '/secret-test' | '/training'
+  to: '/' | '/admin' | '/next-step' | '/training'
+  id: '__root__' | '/' | '/admin' | '/next-step' | '/training'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   NextStepRoute: typeof NextStepRoute
-  SecretTestRoute: typeof SecretTestRoute
   TrainingRoute: typeof TrainingRoute
 }
 
@@ -102,13 +92,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NextStepRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/secret-test': {
-      id: '/secret-test'
-      path: '/secret-test'
-      fullPath: '/secret-test'
-      preLoaderRoute: typeof SecretTestRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/training': {
       id: '/training'
       path: '/training'
@@ -123,7 +106,6 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   NextStepRoute: NextStepRoute,
-  SecretTestRoute: SecretTestRoute,
   TrainingRoute: TrainingRoute,
 }
 export const routeTree = rootRouteImport

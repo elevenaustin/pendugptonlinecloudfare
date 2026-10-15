@@ -21,7 +21,7 @@ export function TopHeadBanner() {
         </span>
 
         <Link
-          to="/next-step"
+          to="/training"
           className="inline-flex items-center gap-1 rounded-full bg-[#00F076] hover:bg-[#00d668] text-black px-2.5 py-0.5 text-[9px] sm:text-[10px] font-black uppercase tracking-wider transition-all shadow-[0_0_10px_rgba(0,240,118,0.5)] shrink-0"
         >
           <span>Claim Seat</span>

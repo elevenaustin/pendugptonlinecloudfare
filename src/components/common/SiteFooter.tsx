@@ -10,8 +10,8 @@ export function SiteFooter() {
   const quickLinks = [
     { label: "Home", to: "/" },
     { label: "Class Syllabus", to: "/training" },
-    { label: "What's Included", to: "/next-step" },
-    { label: "Student Proof", to: "/next-step" },
+    { label: "What's Included", to: "/training" },
+    { label: "Student Proof", to: "/training" },
     { label: "FAQ", to: "/training" },
     { label: "Contact Us", href: "mailto:igkhushishere@gmail.com" },
   ];

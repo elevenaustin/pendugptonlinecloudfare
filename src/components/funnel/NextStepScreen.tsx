@@ -49,9 +49,12 @@ import { SiteFooter } from "@/components/common/SiteFooter";
 import { track } from "@/lib/analytics";
 import { NextStepSkeleton } from "@/components/common/Skeleton";
 import { loadRazorpayScript } from "@/lib/razorpay";
+import { useServerFn } from "@tanstack/react-start";
+import { verifyNextStepAccess } from "@/lib/video.functions";
 
 export function NextStepScreen() {
   const navigate = useNavigate();
+  const verifyAccess = useServerFn(verifyNextStepAccess);
   const { recorded, live } = siteConfig.courses;
   const nextStepVimeoId = siteConfig.nextStepVideo?.vimeoId || "1232620094";
 
@@ -75,45 +78,63 @@ export function NextStepScreen() {
 
   const pricingSectionRef = useRef<HTMLDivElement>(null);
 
-  // Strict Funnel Guard: User must have completed registration AND watched 95%+ of the video
+  // Strict Server-Side Funnel Guard: Verify genuine 95% completion against Supabase
   useEffect(() => {
-    try {
-      // 1. Check if user completed registration
-      const reg = JSON.parse(localStorage.getItem(siteConfig.video.registrationKey) || "null");
-      if (!reg || !reg.registered) {
-        setIsAuthorized(false);
-        navigate({ to: "/" });
-        return;
+    let isCancelled = false;
+
+    async function checkAuthorization() {
+      try {
+        const reg = JSON.parse(localStorage.getItem(siteConfig.video.registrationKey) || "null");
+        if (!reg || !reg.registered) {
+          if (!isCancelled) {
+            setIsAuthorized(false);
+            navigate({ to: "/" });
+          }
+          return;
+        }
+
+        // Central Server Authorization Check: query Supabase public.leads for genuine 95% completion
+        const serverAuth = await verifyAccess({
+          data: {
+            registrationId: reg.registrationId || null,
+            phone: reg.whatsapp || null,
+          },
+        });
+
+        if (isCancelled) return;
+
+        if (serverAuth?.authorized) {
+          setIsAuthorized(true);
+          setIsMounted(true);
+          loadRazorpayScript().catch(() => {});
+        } else {
+          console.warn(
+            "[Security] Access to /next-step denied by server policy:",
+            serverAuth?.reason,
+          );
+          // Purge fraudulent or stale completion keys from localStorage
+          try {
+            localStorage.removeItem(siteConfig.video.completionKey);
+            localStorage.removeItem("pendugpt_secret_bypass");
+          } catch {}
+          setIsAuthorized(false);
+          navigate({ to: "/training" });
+        }
+      } catch (err) {
+        console.warn("[Security] Server verification exception:", err);
+        if (!isCancelled) {
+          setIsAuthorized(false);
+          navigate({ to: "/training" });
+        }
       }
-
-      // Check if user is a designated tester from the dedicated /secret-test route only
-      if (reg.isTester) {
-        setIsAuthorized(true);
-        setIsMounted(true);
-        loadRazorpayScript().catch(() => {});
-        return;
-      }
-
-      // 2. Strict Check: User must have genuinely completed masterclass training video (>= 95%)
-      const isCompleted = localStorage.getItem(siteConfig.video.completionKey) === "true";
-      const saved = JSON.parse(localStorage.getItem(siteConfig.video.storageKey) || "null");
-      const progressValue = typeof saved?.progress === "number" ? saved.progress : 0;
-
-      if (!isCompleted || progressValue < siteConfig.video.completionThreshold) {
-        setIsAuthorized(false);
-        navigate({ to: "/training" });
-        return;
-      }
-
-      setIsAuthorized(true);
-      setIsMounted(true);
-      // Pre-fetch Razorpay script in background for instant modal popup
-      loadRazorpayScript().catch(() => {});
-    } catch {
-      setIsAuthorized(false);
-      navigate({ to: "/" });
     }
-  }, [navigate]);
+
+    checkAuthorization();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [navigate, verifyAccess]);
 
   const triggerControlsAutoHide = () => {
     setShowControls(true);

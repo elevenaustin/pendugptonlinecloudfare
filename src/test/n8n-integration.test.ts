@@ -1278,7 +1278,7 @@ describe("n8n WhatsApp Follow-up & Leads Integration", () => {
       const res = await recordLeadVideoActivity({
         registrationId: "reg-act-1",
         phone: "9817337782",
-        watchSeconds: 120,
+        watchSeconds: 75,
         isCompleted: false,
         client: mockClient,
       });
@@ -1287,7 +1287,7 @@ describe("n8n WhatsApp Follow-up & Leads Integration", () => {
       expect(res.leadId).toBe("reg-act-1");
       expect(queriedId).toBe("reg-act-1");
       expect(updatedPayload).toBeDefined();
-      expect(updatedPayload.watch_seconds).toBe(120);
+      expect(updatedPayload.watch_seconds).toBe(75);
       expect(updatedPayload.video_last_activity_at).toBeDefined();
       // Completion fields must remain untouched when isCompleted is false
       expect(updatedPayload.unlocked_class).toBeUndefined();

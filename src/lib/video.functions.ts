@@ -26,12 +26,17 @@ export const saveVideoProgress = createServerFn({ method: "POST" })
     try {
       const { recordLeadVideoActivity } = await import("./n8n.server");
 
+      // SERVER-SIDE 95% VIDEO COMPLETION POLICY:
+      // Minimum completion threshold is 95% of authoritative 858s video duration (815s).
+      // A client request cannot declare completionStatus = true if lastPositionSeconds < 815!
+      const genuineCompleted = Boolean(data.completionStatus && data.lastPositionSeconds >= 815);
+
       // 1. Primary write: record activity timestamp & watch position in Landing Page public.leads
       const activityResult = await recordLeadVideoActivity({
         registrationId: data.registrationId ?? null,
         phone: data.phone ?? null,
         watchSeconds: data.lastPositionSeconds,
-        isCompleted: data.completionStatus,
+        isCompleted: genuineCompleted,
       });
 
       if (!activityResult.ok) {
@@ -55,7 +60,7 @@ export const saveVideoProgress = createServerFn({ method: "POST" })
                 registration_id: data.registrationId,
                 video_id: data.videoId,
                 last_position_seconds: Math.round(data.lastPositionSeconds * 100) / 100,
-                completion_status: data.completionStatus,
+                completion_status: genuineCompleted,
                 video_last_activity_at: nowIso,
                 updated_at: nowIso,
               },
@@ -68,8 +73,8 @@ export const saveVideoProgress = createServerFn({ method: "POST" })
         }
       }
 
-      // 3. Completion handling
-      if (data.completionStatus && data.registrationId) {
+      // 3. Completion handling (only executed if verified genuine completion threshold >= 815s is met)
+      if (genuineCompleted && data.registrationId) {
         // Optional funnel_events tracking
         try {
           const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -206,5 +211,112 @@ export const retryVideoCompletionWebhook = createServerFn({ method: "POST" })
       });
     } catch (err: any) {
       return { ok: false, error: err.message };
+    }
+  });
+
+export const AUTHORITATIVE_VIDEO_DURATION_SECONDS = 858;
+export const REQUIRED_COMPLETION_PERCENT = 0.95;
+export const REQUIRED_COMPLETION_SECONDS = 815; // 858 * 0.95 = 815.1
+
+export const verifyNextStepAccessSchema = z.object({
+  registrationId: z.string().uuid().optional().nullable(),
+  phone: z.string().optional().nullable(),
+});
+
+export type VerifyNextStepAccessInput = z.infer<typeof verifyNextStepAccessSchema>;
+
+export interface VerifyNextStepAccessResult {
+  authorized: boolean;
+  leadId?: string | null;
+  reason?: string;
+  watchedSeconds?: number;
+}
+
+/**
+ * Central Server Authorization Function for /next-step access and checkout.
+ * Denies access by default. Validates authoritative video completion against public.leads in Supabase.
+ * Fails closed on database errors, missing identity, or insufficient watch time (< 815s / 95%).
+ */
+export const verifyNextStepAccess = createServerFn({ method: "POST" })
+  .validator((data: unknown) => verifyNextStepAccessSchema.parse(data))
+  .handler(async ({ data }): Promise<VerifyNextStepAccessResult> => {
+    if (!data.registrationId && !data.phone) {
+      return { authorized: false, reason: "missing_credentials", watchedSeconds: 0 };
+    }
+
+    try {
+      const { getLeadsSupabaseClient, formatCleanPhone } = await import("./n8n.server");
+      const client = getLeadsSupabaseClient();
+
+      let lead: any = null;
+
+      // 1. Primary lookup by registrationId in public.leads
+      if (data.registrationId) {
+        const { data: byId } = await client
+          .from("leads")
+          .select("id, phone, watch_seconds, unlocked_class, video_completed_at")
+          .eq("id", data.registrationId)
+          .maybeSingle();
+
+        if (byId) {
+          lead = byId;
+        }
+      }
+
+      // 2. Secondary lookup by clean phone only if not found by registrationId
+      if (!lead && data.phone) {
+        const cleanPhone = formatCleanPhone(data.phone);
+        if (cleanPhone) {
+          const { data: byPhone } = await client
+            .from("leads")
+            .select("id, phone, watch_seconds, unlocked_class, video_completed_at")
+            .eq("phone", cleanPhone)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (byPhone) {
+            lead = byPhone;
+          }
+        }
+      }
+
+      if (!lead) {
+        return { authorized: false, reason: "lead_not_found", watchedSeconds: 0 };
+      }
+
+      // 3. Student Identity Binding: verify registrationId and phone belong to the same student lead
+      if (lead && data.phone && data.registrationId) {
+        const cleanPhone = formatCleanPhone(data.phone);
+        const leadPhone = formatCleanPhone(lead.phone);
+        if (cleanPhone && leadPhone && cleanPhone !== leadPhone) {
+          console.warn("[Security] verifyNextStepAccess: identity mismatch between registrationId and phone");
+          return { authorized: false, reason: "identity_mismatch", watchedSeconds: 0 };
+        }
+      }
+
+      const watchSeconds = Number(lead.watch_seconds) || 0;
+      // Authoritative Policy: Must have unlocked_class AND at least 815s (95%) watch time or genuine completion timestamp
+      const hasWatchedThreshold = watchSeconds >= REQUIRED_COMPLETION_SECONDS;
+      const isCompleted = Boolean(lead.unlocked_class) && (hasWatchedThreshold || Boolean(lead.video_completed_at));
+
+      if (!isCompleted) {
+        return {
+          authorized: false,
+          leadId: lead.id,
+          reason: "video_incomplete",
+          watchedSeconds: watchSeconds,
+        };
+      }
+
+      return {
+        authorized: true,
+        leadId: lead.id,
+        watchedSeconds: watchSeconds,
+      };
+    } catch (err: any) {
+      console.error("[verifyNextStepAccess] Verification exception:", err);
+      // Deny by default / fail closed
+      return { authorized: false, reason: "server_verification_error", watchedSeconds: 0 };
     }
   });

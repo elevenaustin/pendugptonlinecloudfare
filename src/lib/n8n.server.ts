@@ -590,10 +590,12 @@ export async function syncOrFindLeadRecord(
     if (opts.isCompleted || watchSeconds > 0) {
       updatePayload.video_last_activity_at = nowIso;
     }
-    if (opts.isCompleted && !existingLead.unlocked_class) {
+    // STRICT SERVER POLICY: unlocked_class and video_completed_at can ONLY be set if watch_seconds >= 815 (95% threshold)
+    const isGenuineComplete = Boolean(opts.isCompleted && watchSeconds >= 815);
+    if (isGenuineComplete && !existingLead.unlocked_class) {
       updatePayload.unlocked_class = true;
     }
-    if (opts.isCompleted && !existingLead.video_completed_at) {
+    if (isGenuineComplete && !existingLead.video_completed_at) {
       updatePayload.video_completed_at = nowIso;
     }
 
@@ -616,6 +618,7 @@ export async function syncOrFindLeadRecord(
 
   // 3. Lead is missing from CRM: safely sync/insert genuine record using verified registration data
   const newLeadId = opts.registrationId || crypto.randomUUID();
+  const isGenuineComplete = Boolean(opts.isCompleted && watchSeconds >= 815);
   const newLead = {
     id: newLeadId,
     created_at: nowIso,
@@ -623,8 +626,8 @@ export async function syncOrFindLeadRecord(
     gender,
     has_laptop: hasLaptop,
     watch_seconds: watchSeconds,
-    unlocked_class: Boolean(opts.isCompleted),
-    video_completed_at: opts.isCompleted ? nowIso : null,
+    unlocked_class: isGenuineComplete,
+    video_completed_at: isGenuineComplete ? nowIso : null,
     video_last_activity_at: opts.isCompleted || watchSeconds > 0 ? nowIso : null,
     whatsapp_followup_status: "NOT_SENT",
     user_agent: `Masterclass Funnel | ${opts.device || "Web"}`,
@@ -749,15 +752,70 @@ export async function recordLeadVideoActivity(
       return { ok: false, leadId: null, error: "Lead record not found" };
     }
 
+    // 3. Student Identity Binding: verify registrationId matches phone if both are present
+    if (existingLead && rawPhone) {
+      const cleanPhone = formatCleanPhone(rawPhone);
+      const leadPhone = formatCleanPhone(existingLead.phone);
+      if (cleanPhone && leadPhone && cleanPhone !== leadPhone) {
+        console.warn(
+          `[Security] Identity mismatch: registrationId ${registrationId} does not match phone ${rawPhone}`,
+        );
+        return { ok: false, leadId: null, error: "Student identity verification mismatch" };
+      }
+    }
+
     const updatePayload: Record<string, any> = {
       video_last_activity_at: nowIso,
     };
 
-    if (watchSeconds > (Number(existingLead.watch_seconds) || 0)) {
-      updatePayload.watch_seconds = watchSeconds;
+    const prevSeconds = Number(existingLead.watch_seconds) || 0;
+    let finalWatchSeconds = prevSeconds;
+
+    // If already genuinely unlocked and completed, preserve completed status
+    const isAlreadyCompleted = Boolean(
+      existingLead.unlocked_class && existingLead.video_completed_at,
+    );
+
+    if (isAlreadyCompleted) {
+      finalWatchSeconds = Math.max(prevSeconds, Math.min(858, watchSeconds));
+    } else {
+      // Server-validated interval accumulation:
+      // Calculate server elapsed real wall-clock time since last activity
+      const lastActivityAt = existingLead.video_last_activity_at || existingLead.created_at;
+      const serverElapsedSeconds = lastActivityAt
+        ? Math.max(0, (Date.now() - new Date(lastActivityAt).getTime()) / 1000)
+        : 30;
+
+      // Calculate forward position delta claimed by client
+      const positionDelta = watchSeconds - prevSeconds;
+
+      if (positionDelta <= 0) {
+        // Rewound, paused, or stalled: zero increment added
+        finalWatchSeconds = prevSeconds;
+      } else {
+        // Human viewing physical limit: cannot accumulate more seconds than server elapsed time
+        // Allow up to 1.25x speed + 5s network jitter ceiling, capped at 45s maximum per heartbeat
+        const maxPossibleInTime = Math.ceil(serverElapsedSeconds * 1.25 + 5);
+        const increment = Math.min(positionDelta, maxPossibleInTime, 45);
+
+        if (positionDelta > increment && positionDelta > 30) {
+          console.warn(
+            `[Security] Skipped seek rejected: client claimed +${positionDelta}s jump in ${Math.round(serverElapsedSeconds)}s. Only crediting +${increment}s.`,
+          );
+        }
+
+        finalWatchSeconds = Math.min(858, prevSeconds + increment);
+      }
     }
 
-    if (opts.isCompleted) {
+    updatePayload.watch_seconds = finalWatchSeconds;
+
+    // STRICT SERVER-SIDE COMPLETION POLICY:
+    // Requires verified watch_seconds >= 815 (95% of authoritative 858s video).
+    // A client request cannot forge isCompleted = true when accumulated watch_seconds < 815.
+    const isNowComplete = isAlreadyCompleted || finalWatchSeconds >= 815;
+
+    if (isNowComplete) {
       if (!existingLead.unlocked_class) {
         updatePayload.unlocked_class = true;
       }
