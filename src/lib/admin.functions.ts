@@ -1250,13 +1250,15 @@ export const syncRegistrationsToSupabaseLeads = createServerFn({ method: "POST" 
 
       const { data: rows, error } = await supabaseAdmin
         .from("registrations")
-        .select("id, phone_country_code, phone_number, gender, device_availability, created_at, video_progress(last_position_seconds, completion_status)")
+        .select("id, phone_country_code, phone_number, gender, device_availability, created_at, video_progress(last_position_seconds, completion_status, updated_at)")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
 
-      const targetSupabaseUrl = "https://gifxzzrbpukpxsvmhokj.supabase.co";
-      const targetSupabaseAnonKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpZnh6enJicHVrcHhzdm1ob2tqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjQ4ODYsImV4cCI6MjEwNjM0MDg4Nn0.__waNLX5psBQoCoU-kpFDxhwG0J0lTrcZQ-GPE0IpEM";
+      const targetSupabaseUrl = process.env["LEADS_SUPABASE_URL"] || "https://gifxzzrbpukpxsvmhokj.supabase.co";
+      const targetSupabaseKey =
+        process.env["LEADS_SUPABASE_SERVICE_ROLE_KEY"] ||
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdpZnh6enJicHVrcHhzdm1ob2tqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTA3NjQ4ODYsImV4cCI6MjEwNjM0MDg4Nn0.__waNLX5psBQoCoU-kpFDxhwG0J0lTrcZQ-GPE0IpEM";
 
       const formattedLeads = (rows || []).map((r: any) => {
         const vid = Array.isArray(r.video_progress) ? r.video_progress[0] : r.video_progress;
@@ -1265,6 +1267,8 @@ export const syncRegistrationsToSupabaseLeads = createServerFn({ method: "POST" 
         const cleanPhone = (r.phone_number || "").replace(/\D/g, "");
         const deviceStr = (r.device_availability || "").toLowerCase();
         const hasLaptop = deviceStr.includes("yes") ? "yes" : deviceStr.includes("no") ? "no" : "later";
+        const videoActivityAt =
+          vid?.updated_at || (watchSec > 0 ? (r.created_at || new Date().toISOString()) : null);
 
         return {
           id: r.id || `reg_${cleanPhone}`,
@@ -1275,7 +1279,8 @@ export const syncRegistrationsToSupabaseLeads = createServerFn({ method: "POST" 
           watch_seconds: watchSec,
           unlocked_class: isCompleted,
           whatsapp_followup_status: "NOT_SENT",
-          video_completed_at: isCompleted ? (r.created_at || new Date().toISOString()) : null,
+          video_completed_at: isCompleted ? (vid?.updated_at || r.created_at || new Date().toISOString()) : null,
+          video_last_activity_at: videoActivityAt,
           user_agent: `Masterclass CRM Sync | ${r.device_availability || ""}`,
         };
       });
@@ -1290,8 +1295,8 @@ export const syncRegistrationsToSupabaseLeads = createServerFn({ method: "POST" 
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              apikey: targetSupabaseAnonKey,
-              Authorization: `Bearer ${targetSupabaseAnonKey}`,
+              apikey: targetSupabaseKey,
+              Authorization: `Bearer ${targetSupabaseKey}`,
               Prefer: "resolution=merge-duplicates",
             },
             body: JSON.stringify(batch),

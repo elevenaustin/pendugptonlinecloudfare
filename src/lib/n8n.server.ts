@@ -781,10 +781,11 @@ export async function recordLeadVideoActivity(
     } else {
       // Server-validated interval accumulation:
       // Calculate server elapsed real wall-clock time since last activity
-      const lastActivityAt = existingLead.video_last_activity_at || existingLead.created_at;
+      const lastActivityAt = existingLead.video_last_activity_at;
+      // If video_last_activity_at is null (e.g. initial playback or legacy lead), allow up to 45s baseline
       const serverElapsedSeconds = lastActivityAt
         ? Math.max(0, (Date.now() - new Date(lastActivityAt).getTime()) / 1000)
-        : 30;
+        : 45;
 
       // Calculate forward position delta claimed by client
       const positionDelta = watchSeconds - prevSeconds;
@@ -824,14 +825,25 @@ export async function recordLeadVideoActivity(
       }
     }
 
-    const { error: updateErr } = await client
+    const updateRes = await client
       .from("leads")
       .update(updatePayload)
       .eq("id", existingLead.id);
 
-    if (updateErr) {
-      console.warn("[n8n.server] recordLeadVideoActivity update error:", updateErr.message);
-      return { ok: false, leadId: existingLead.id, error: updateErr.message };
+    if (updateRes?.error) {
+      console.warn("[n8n.server] recordLeadVideoActivity update error:", updateRes.error.message);
+      return { ok: false, leadId: existingLead.id, error: updateRes.error.message };
+    }
+
+    if (updateRes && "data" in updateRes && Array.isArray(updateRes.data) && updateRes.data.length === 0) {
+      console.warn(
+        `[n8n.server] recordLeadVideoActivity: database update affected 0 rows for lead ${existingLead.id} (possible RLS or missing lead)`,
+      );
+      return {
+        ok: false,
+        leadId: existingLead.id,
+        error: "Database update affected 0 rows. Verify service-role permissions.",
+      };
     }
 
     return { ok: true, leadId: existingLead.id, updated: true };

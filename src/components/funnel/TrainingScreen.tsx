@@ -196,7 +196,8 @@ export function TrainingScreen() {
 
       // Sync to database periodically (every 20–30s during active playback, or on pause/play/exit)
       const regId = registrationIdRef.current;
-      if (regId) {
+      const phone = userPhoneRef.current;
+      if (regId || phone) {
         const now = Date.now();
         const timeSinceLastSave = now - lastRemoteSaveTimeRef.current;
         const posDiff = Math.abs(pos - lastRemoteSavePosRef.current);
@@ -217,8 +218,8 @@ export function TrainingScreen() {
 
           saveRemoteProgress({
             data: {
-              registrationId: regId,
-              phone: userPhoneRef.current,
+              registrationId: regId || undefined,
+              phone: phone || undefined,
               videoId: vimeoId,
               lastPositionSeconds: pos,
               completionStatus: genuineComplete,

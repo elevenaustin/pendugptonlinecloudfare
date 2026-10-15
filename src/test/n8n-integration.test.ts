@@ -8,6 +8,7 @@ import {
   acquireCampaignLock,
   finalizeCampaignSend,
   processVideoCompletionEvent,
+  syncOrFindLeadRecord,
   recordLeadVideoActivity,
   getRemoteLeadProgress,
   sendN8nVideoInactivityWebhook,
@@ -1399,6 +1400,238 @@ describe("n8n WhatsApp Follow-up & Leads Integration", () => {
       expect(updatedPayload.unlocked_class).toBe(true);
       expect(updatedPayload.video_completed_at).toBeDefined();
       expect(updatedPayload.video_last_activity_at).toBeDefined();
+    });
+
+    it("records UTC ISO video_last_activity_at when creating a new lead with active watch time", async () => {
+      let insertedLead: any = null;
+      const mockClient = {
+        from: (table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: async () => ({ data: null, error: null }),
+                  order: () => ({
+                    limit: () => ({
+                      maybeSingle: async () => ({ data: null, error: null }),
+                    }),
+                  }),
+                }),
+              }),
+              upsert: (payload: any) => {
+                insertedLead = payload;
+                return {
+                  select: () => ({
+                    maybeSingle: async () => ({ data: payload, error: null }),
+                  }),
+                };
+              },
+            };
+          }
+          return {};
+        },
+      };
+
+      const res = await syncOrFindLeadRecord({
+        registrationId: "new-student-uuid-101",
+        phone: "+91 98173 37782",
+        watchSeconds: 120,
+        isCompleted: false,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(insertedLead).toBeDefined();
+      expect(insertedLead.id).toBe("new-student-uuid-101");
+      expect(insertedLead.watch_seconds).toBe(120);
+      expect(insertedLead.video_last_activity_at).toBeDefined();
+      expect(typeof insertedLead.video_last_activity_at).toBe("string");
+      // Must be valid UTC ISO timestamp ending in Z
+      expect(insertedLead.video_last_activity_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      expect(new Date(insertedLead.video_last_activity_at).getTime()).toBeGreaterThan(0);
+    });
+
+    it("updates video_last_activity_at to valid UTC ISO timestamp on existing lead with NULL timestamp (793s issue resolution)", async () => {
+      let updatedPayload: any = null;
+      const mockLead = {
+        id: "b50fd0f8-7c2a-4755-bb7d-8eaee254b720",
+        phone: "9468728462",
+        watch_seconds: 793,
+        unlocked_class: true,
+        video_completed_at: "2026-10-08T08:58:47.120Z",
+        video_last_activity_at: null, // confirmed production issue: NULL timestamp
+        created_at: "2026-10-08T08:58:47.120Z",
+      };
+
+      const mockClient = {
+        from: (table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                eq: (_col: string, val: string) => ({
+                  maybeSingle: async () => ({
+                    data: val === mockLead.id ? mockLead : null,
+                    error: null,
+                  }),
+                }),
+              }),
+              update: (payload: any) => {
+                updatedPayload = payload;
+                return {
+                  eq: (_col: string, val: string) => {
+                    if (val === mockLead.id) {
+                      Object.assign(mockLead, payload);
+                      return Promise.resolve({ data: [mockLead], error: null });
+                    }
+                    return Promise.resolve({ data: [], error: null });
+                  },
+                };
+              },
+            };
+          }
+          return {};
+        },
+      };
+
+      const beforeCall = Date.now();
+      const res = await recordLeadVideoActivity({
+        registrationId: mockLead.id,
+        phone: mockLead.phone,
+        watchSeconds: 805,
+        isCompleted: false,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(res.leadId).toBe(mockLead.id);
+      expect(updatedPayload).toBeDefined();
+      expect(updatedPayload.video_last_activity_at).toBeDefined();
+      // Must be a valid UTC ISO string
+      expect(updatedPayload.video_last_activity_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+      const activityTimestamp = new Date(updatedPayload.video_last_activity_at).getTime();
+      expect(activityTimestamp).toBeGreaterThanOrEqual(beforeCall - 1000);
+      expect(activityTimestamp).toBeLessThanOrEqual(Date.now() + 1000);
+      // Preserves original lead ID, phone, and updates watch_seconds
+      expect(mockLead.id).toBe("b50fd0f8-7c2a-4755-bb7d-8eaee254b720");
+      expect(mockLead.phone).toBe("9468728462");
+      expect(updatedPayload.watch_seconds).toBe(805);
+    });
+
+    it("updates video_last_activity_at on periodic playback progress and zero-delta pauses", async () => {
+      let updatedPayload: any = null;
+      const mockLead = {
+        id: "lead-pause-activity-1",
+        phone: "9817337782",
+        watch_seconds: 350,
+        unlocked_class: false,
+        video_completed_at: null,
+        video_last_activity_at: new Date(Date.now() - 60000).toISOString(),
+        created_at: new Date(Date.now() - 3600000).toISOString(),
+      };
+
+      const mockClient = {
+        from: (table: string) => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: mockLead, error: null }),
+            }),
+          }),
+          update: (payload: any) => {
+            updatedPayload = payload;
+            Object.assign(mockLead, payload);
+            return {
+              eq: () => Promise.resolve({ data: [mockLead], error: null }),
+            };
+          },
+        }),
+      };
+
+      // User pauses or triggers inactivity at the same position (zero delta)
+      const res = await recordLeadVideoActivity({
+        registrationId: "lead-pause-activity-1",
+        phone: "9817337782",
+        watchSeconds: 350,
+        isCompleted: false,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(updatedPayload).toBeDefined();
+      expect(updatedPayload.watch_seconds).toBe(350);
+      expect(updatedPayload.video_last_activity_at).toBeDefined();
+      expect(new Date(updatedPayload.video_last_activity_at).getTime()).toBeGreaterThan(
+        new Date(mockLead.created_at).getTime(),
+      );
+    });
+
+    it("handles database write errors safely and returns ok: false", async () => {
+      const mockLead = {
+        id: "lead-db-fail-1",
+        phone: "9817337782",
+        watch_seconds: 100,
+        unlocked_class: false,
+        video_completed_at: null,
+        video_last_activity_at: null,
+      };
+
+      const mockClient = {
+        from: (table: string) => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: mockLead, error: null }),
+            }),
+          }),
+          update: () => ({
+            eq: () => Promise.resolve({ error: { message: "Database connection timeout" } }),
+          }),
+        }),
+      };
+
+      const res = await recordLeadVideoActivity({
+        registrationId: "lead-db-fail-1",
+        phone: "9817337782",
+        watchSeconds: 120,
+        isCompleted: false,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("Database connection timeout");
+    });
+
+    it("detects silent RLS failure when database update affects 0 rows", async () => {
+      const mockLead = {
+        id: "lead-rls-fail-1",
+        phone: "9817337782",
+        watch_seconds: 100,
+        unlocked_class: false,
+        video_completed_at: null,
+        video_last_activity_at: null,
+      };
+
+      const mockClient = {
+        from: (table: string) => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: mockLead, error: null }),
+            }),
+          }),
+          update: () => ({
+            eq: () => Promise.resolve({ data: [], error: null }), // PostgREST RLS blocks write: 0 rows returned
+          }),
+        }),
+      };
+
+      const res = await recordLeadVideoActivity({
+        registrationId: "lead-rls-fail-1",
+        phone: "9817337782",
+        watchSeconds: 120,
+        isCompleted: false,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(false);
+      expect(res.error).toContain("0 rows");
     });
 
     it("evaluates 30-minute inactivity eligibility accurately", () => {

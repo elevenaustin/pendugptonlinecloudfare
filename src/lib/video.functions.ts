@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 export const videoProgressSchema = z.object({
-  registrationId: z.string().uuid().optional().nullable(),
+  registrationId: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),
   videoId: z.string().min(1),
   lastPositionSeconds: z.number().min(0),
@@ -138,7 +138,7 @@ export const fetchRemoteVideoProgress = createServerFn({ method: "POST" })
   .validator((data: unknown) =>
     z
       .object({
-        registrationId: z.string().uuid().optional().nullable(),
+        registrationId: z.string().optional().nullable(),
         phone: z.string().optional().nullable(),
         videoId: z.string().min(1),
       })
@@ -197,7 +197,7 @@ export const retryVideoCompletionWebhook = createServerFn({ method: "POST" })
   .validator((data: unknown) =>
     z
       .object({
-        registrationId: z.string().uuid(),
+        registrationId: z.string().min(1),
         phone: z.string().optional().nullable(),
       })
       .parse(data),
@@ -322,7 +322,7 @@ export const verifyNextStepAccess = createServerFn({ method: "POST" })
   });
 
 export const videoInactivitySchema = z.object({
-  registrationId: z.string().uuid().optional().nullable(),
+  registrationId: z.string().optional().nullable(),
   phone: z.string().optional().nullable(),
   videoId: z.string().min(1),
   lastPositionSeconds: z.number().min(0).optional(),
@@ -345,15 +345,13 @@ export const reportVideoInactivity = createServerFn({ method: "POST" })
 
     try {
       // 1. Record latest activity timestamp & position in public.leads first
-      if (typeof data.lastPositionSeconds === "number") {
-        const { recordLeadVideoActivity } = await import("./n8n.server");
-        await recordLeadVideoActivity({
-          registrationId: data.registrationId ?? null,
-          phone: data.phone ?? null,
-          watchSeconds: data.lastPositionSeconds,
-          isCompleted: false,
-        });
-      }
+      const { recordLeadVideoActivity } = await import("./n8n.server");
+      await recordLeadVideoActivity({
+        registrationId: data.registrationId ?? null,
+        phone: data.phone ?? null,
+        watchSeconds: typeof data.lastPositionSeconds === "number" ? data.lastPositionSeconds : 0,
+        isCompleted: false,
+      });
 
       // 2. Process inactivity event and dispatch to n8n if eligible
       const { processVideoInactivityEvent } = await import("./n8n.server");
