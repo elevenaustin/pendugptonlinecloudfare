@@ -8,6 +8,8 @@ import {
   acquireCampaignLock,
   finalizeCampaignSend,
   processVideoCompletionEvent,
+  recordLeadVideoActivity,
+  getRemoteLeadProgress,
   CAMPAIGN_NAME,
 } from "@/lib/n8n.server";
 
@@ -1223,6 +1225,260 @@ describe("n8n WhatsApp Follow-up & Leads Integration", () => {
       expect(res2.deduplicated).toBe(true);
       // Fetch should NEVER be called again! Exactly 1 delivery for this phone.
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Video Last Activity Tracking (recordLeadVideoActivity)", () => {
+    it("updates video_last_activity_at and watch_seconds using stable registrationId", async () => {
+      let updatedPayload: any = null;
+      let queriedId: any = null;
+
+      const mockLead = {
+        id: "reg-act-1",
+        phone: "9817337782",
+        watch_seconds: 45,
+        unlocked_class: false,
+        video_completed_at: null,
+        video_last_activity_at: null,
+      };
+
+      const mockClient = {
+        from: (table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                eq: (_col: string, val: string) => {
+                  queriedId = val;
+                  return {
+                    maybeSingle: async () => ({
+                      data: val === "reg-act-1" ? mockLead : null,
+                      error: null,
+                    }),
+                  };
+                },
+              }),
+              update: (payload: any) => {
+                updatedPayload = payload;
+                return {
+                  eq: (_col: string, val: string) => {
+                    if (val === "reg-act-1") {
+                      Object.assign(mockLead, payload);
+                      return Promise.resolve({ error: null });
+                    }
+                    return Promise.resolve({ error: { message: "Not found" } });
+                  },
+                };
+              },
+            };
+          }
+          return {};
+        },
+      };
+
+      const res = await recordLeadVideoActivity({
+        registrationId: "reg-act-1",
+        phone: "9817337782",
+        watchSeconds: 120,
+        isCompleted: false,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(res.leadId).toBe("reg-act-1");
+      expect(queriedId).toBe("reg-act-1");
+      expect(updatedPayload).toBeDefined();
+      expect(updatedPayload.watch_seconds).toBe(120);
+      expect(updatedPayload.video_last_activity_at).toBeDefined();
+      // Completion fields must remain untouched when isCompleted is false
+      expect(updatedPayload.unlocked_class).toBeUndefined();
+      expect(updatedPayload.video_completed_at).toBeUndefined();
+    });
+
+    it("falls back to clean phone lookup if registrationId is not found in CRM", async () => {
+      let updatedPayload: any = null;
+
+      const mockLead = {
+        id: "crm-legacy-lead-999",
+        phone: "9817337782",
+        watch_seconds: 30,
+        unlocked_class: false,
+        video_completed_at: null,
+      };
+
+      const mockClient = {
+        from: (table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                eq: (col: string, val: string) => {
+                  if (col === "id") {
+                    return {
+                      maybeSingle: async () => ({ data: null, error: null }),
+                    };
+                  }
+                  if (col === "phone") {
+                    return {
+                      order: () => ({
+                        limit: () => ({
+                          maybeSingle: async () => ({
+                            data: val === "9817337782" ? mockLead : null,
+                            error: null,
+                          }),
+                        }),
+                      }),
+                    };
+                  }
+                  return { maybeSingle: async () => ({ data: null }) };
+                },
+              }),
+              update: (payload: any) => {
+                updatedPayload = payload;
+                return {
+                  eq: () => Promise.resolve({ error: null }),
+                };
+              },
+            };
+          }
+          return {};
+        },
+      };
+
+      const res = await recordLeadVideoActivity({
+        registrationId: "unknown-reg-id",
+        phone: "+91 98173 37782",
+        watchSeconds: 65,
+        isCompleted: false,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(res.leadId).toBe("crm-legacy-lead-999");
+      expect(updatedPayload.watch_seconds).toBe(65);
+      expect(updatedPayload.video_last_activity_at).toBeDefined();
+    });
+
+    it("sets video_completed_at and unlocked_class when isCompleted is true", async () => {
+      let updatedPayload: any = null;
+
+      const mockLead = {
+        id: "reg-complete-1",
+        phone: "9817337782",
+        watch_seconds: 800,
+        unlocked_class: false,
+        video_completed_at: null,
+      };
+
+      const mockClient = {
+        from: (table: string) => ({
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: mockLead, error: null }),
+            }),
+          }),
+          update: (payload: any) => {
+            updatedPayload = payload;
+            return {
+              eq: () => Promise.resolve({ error: null }),
+            };
+          },
+        }),
+      };
+
+      const res = await recordLeadVideoActivity({
+        registrationId: "reg-complete-1",
+        phone: "9817337782",
+        watchSeconds: 820,
+        isCompleted: true,
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(updatedPayload.unlocked_class).toBe(true);
+      expect(updatedPayload.video_completed_at).toBeDefined();
+      expect(updatedPayload.video_last_activity_at).toBeDefined();
+    });
+
+    it("evaluates 30-minute inactivity eligibility accurately", () => {
+      const now = Date.now();
+      const thirtyFiveMinAgo = new Date(now - 35 * 60 * 1000).toISOString();
+      const tenMinAgo = new Date(now - 10 * 60 * 1000).toISOString();
+
+      const candidateA: {
+        id: string;
+        video_last_activity_at: string;
+        unlocked_class: boolean;
+        video_completed_at: string | null;
+        whatsapp_followup_status: string;
+      } = {
+        id: "lead-inactive-35m",
+        video_last_activity_at: thirtyFiveMinAgo,
+        unlocked_class: false,
+        video_completed_at: null,
+        whatsapp_followup_status: "NOT_SENT",
+      };
+
+      const candidateB = {
+        id: "lead-active-10m",
+        video_last_activity_at: tenMinAgo,
+        unlocked_class: false,
+        video_completed_at: null,
+        whatsapp_followup_status: "NOT_SENT",
+      };
+
+      const isEligibleForInactivityReminder = (lead: any) => {
+        if (lead.unlocked_class || lead.video_completed_at) return false;
+        if (lead.whatsapp_followup_status !== "NOT_SENT") return false;
+        if (!lead.video_last_activity_at) return false;
+        const lastActTime = new Date(lead.video_last_activity_at).getTime();
+        const diffMinutes = (Date.now() - lastActTime) / (1000 * 60);
+        return diffMinutes >= 30;
+      };
+
+      expect(isEligibleForInactivityReminder(candidateA)).toBe(true);
+      expect(isEligibleForInactivityReminder(candidateB)).toBe(false);
+
+      // If user completed in the meantime, must be skipped
+      candidateA.video_completed_at = new Date().toISOString();
+      expect(isEligibleForInactivityReminder(candidateA)).toBe(false);
+    });
+
+    it("restores remote video progress directly from public.leads without requiring video_progress table", async () => {
+      const mockLead = {
+        id: "22222222-2222-2222-2222-222222222222",
+        phone: "9817337782",
+        watch_seconds: 412,
+        unlocked_class: false,
+        video_completed_at: null,
+      };
+
+      const mockClient = {
+        from: (table: string) => {
+          if (table === "leads") {
+            return {
+              select: () => ({
+                eq: (_col: string, val: string) => ({
+                  maybeSingle: async () => ({
+                    data: val === "22222222-2222-2222-2222-222222222222" ? mockLead : null,
+                    error: null,
+                  }),
+                }),
+              }),
+            };
+          }
+          return {};
+        },
+      };
+
+      const res = await getRemoteLeadProgress({
+        registrationId: "22222222-2222-2222-2222-222222222222",
+        phone: "9817337782",
+        client: mockClient,
+      });
+
+      expect(res.ok).toBe(true);
+      expect(res.progress).toBeDefined();
+      expect(res.progress?.lastPosition).toBe(412);
+      expect(res.progress?.isCompleted).toBe(false);
     });
   });
 });

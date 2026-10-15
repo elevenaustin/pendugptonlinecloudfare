@@ -19,6 +19,7 @@ export type Database = {
           whatsapp_followup_sent_at: string | null;
           whatsapp_last_reply_at: string | null;
           video_completed_at: string | null;
+          video_last_activity_at?: string | null;
           user_agent: string | null;
           consent?: boolean;
           email?: string | null;
@@ -38,6 +39,7 @@ export type Database = {
           whatsapp_followup_sent_at?: string | null;
           whatsapp_last_reply_at?: string | null;
           video_completed_at?: string | null;
+          video_last_activity_at?: string | null;
           user_agent?: string | null;
           consent?: boolean;
           email?: string | null;
@@ -57,6 +59,7 @@ export type Database = {
           whatsapp_followup_sent_at?: string | null;
           whatsapp_last_reply_at?: string | null;
           video_completed_at?: string | null;
+          video_last_activity_at?: string | null;
           user_agent?: string | null;
           consent?: boolean;
           email?: string | null;
@@ -152,6 +155,7 @@ export type Database = {
           last_position_seconds: number;
           completion_status: boolean;
           video_completed_at: string | null;
+          video_last_activity_at?: string | null;
           updated_at: string;
         };
         Insert: {
@@ -161,6 +165,7 @@ export type Database = {
           last_position_seconds?: number;
           completion_status?: boolean;
           video_completed_at?: string | null;
+          video_last_activity_at?: string | null;
           updated_at?: string;
         };
         Update: {
@@ -170,6 +175,7 @@ export type Database = {
           last_position_seconds?: number;
           completion_status?: boolean;
           video_completed_at?: string | null;
+          video_last_activity_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];

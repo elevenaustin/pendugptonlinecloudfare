@@ -39,7 +39,9 @@ export function TrainingScreen() {
   const watchedRef = useRef(0);
   const lastPositionRef = useRef(0);
   const durationRef = useRef(0);
-  const lastRemoteSaveRef = useRef(0);
+  const lastRemoteSavePosRef = useRef(0);
+  const lastRemoteSaveTimeRef = useRef(0);
+  const isSavingRemoteRef = useRef(false);
   const lastTimeCheckRef = useRef<number>(Date.now());
   const registrationIdRef = useRef<string | null>(null);
   const userPhoneRef = useRef<string | null>(null);
@@ -161,11 +163,16 @@ export function TrainingScreen() {
     }
   }, [storageKey, completionKey, completionThreshold, registrationKey, navigate, vimeoId, fetchRemoteProgress]);
 
-  const persist = (p: number, complete: boolean, currentSeconds?: number) => {
+  const persist = (
+    p: number,
+    complete: boolean,
+    currentSeconds?: number,
+    forceRemote = false,
+  ) => {
     try {
       const pos = typeof currentSeconds === "number" ? currentSeconds : lastPositionRef.current;
       lastPositionRef.current = pos;
-      
+
       // Strict integrity: only mark complete if progress >= completionThreshold
       const genuineComplete = complete && p >= completionThreshold;
 
@@ -185,19 +192,43 @@ export function TrainingScreen() {
         localStorage.removeItem(completionKey);
       }
 
-      // Sync to Supabase video_progress table periodically (every 5s or on completion)
+      // Sync to database periodically (every 20–30s during active playback, or on pause/play/exit)
       const regId = registrationIdRef.current;
-      if (regId && (genuineComplete || Math.abs(pos - lastRemoteSaveRef.current) >= 5)) {
-        lastRemoteSaveRef.current = pos;
-        saveRemoteProgress({
-          data: {
-            registrationId: regId,
-            phone: userPhoneRef.current,
-            videoId: vimeoId,
-            lastPositionSeconds: pos,
-            completionStatus: genuineComplete,
-          },
-        }).catch(() => {});
+      if (regId) {
+        const now = Date.now();
+        const timeSinceLastSave = now - lastRemoteSaveTimeRef.current;
+        const posDiff = Math.abs(pos - lastRemoteSavePosRef.current);
+
+        // Conditions to trigger remote write:
+        // 1. Completion is reached (always write immediately)
+        // 2. Explicit action (pause, play resume, page exit) if position moved >= 2s or time >= 20s
+        // 3. Periodic active playback: every 25s (within 20–30s requirement) and pos advanced >= 15s
+        const shouldSave =
+          genuineComplete ||
+          (forceRemote && (posDiff >= 2 || timeSinceLastSave >= 20000)) ||
+          (timeSinceLastSave >= 25000 && posDiff >= 15);
+
+        if (shouldSave && (!isSavingRemoteRef.current || genuineComplete)) {
+          isSavingRemoteRef.current = true;
+          lastRemoteSaveTimeRef.current = now;
+          lastRemoteSavePosRef.current = pos;
+
+          saveRemoteProgress({
+            data: {
+              registrationId: regId,
+              phone: userPhoneRef.current,
+              videoId: vimeoId,
+              lastPositionSeconds: pos,
+              completionStatus: genuineComplete,
+            },
+          })
+            .catch((err) => {
+              console.warn("[TrainingScreen] Video activity sync notice:", err);
+            })
+            .finally(() => {
+              isSavingRemoteRef.current = false;
+            });
+        }
       }
     } catch {
       /* ignore */
@@ -207,7 +238,7 @@ export function TrainingScreen() {
   // Synchronize on page exit / tab switch
   useEffect(() => {
     const handlePageExit = () => {
-      persist(progress, isCompleted, lastPositionRef.current);
+      persist(progress, isCompleted, lastPositionRef.current, true);
     };
 
     window.addEventListener("beforeunload", handlePageExit);
@@ -329,6 +360,12 @@ export function TrainingScreen() {
         setHasStarted(true);
         triggerControlsAutoHide();
         track("video_start");
+        try {
+          const cur = await player.getCurrentTime();
+          persist(progress, isCompleted, cur, true);
+        } catch {
+          /* ignore */
+        }
       });
 
       player.on("playing", () => {
@@ -345,7 +382,7 @@ export function TrainingScreen() {
         setIsBuffering(false);
       });
 
-      player.on("waiting", () => {
+      (player as any).on("waiting", () => {
         setIsBuffering(true);
       });
 
@@ -356,7 +393,7 @@ export function TrainingScreen() {
         if (hideControlsTimer.current) clearTimeout(hideControlsTimer.current);
         try {
           const cur = await player.getCurrentTime();
-          persist(progress, isCompleted, cur);
+          persist(progress, isCompleted, cur, true);
         } catch {
           /* ignore */
         }

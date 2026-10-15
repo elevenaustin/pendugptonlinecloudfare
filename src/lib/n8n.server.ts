@@ -587,6 +587,9 @@ export async function syncOrFindLeadRecord(
     if (watchSeconds > (Number(existingLead.watch_seconds) || 0)) {
       updatePayload.watch_seconds = watchSeconds;
     }
+    if (opts.isCompleted || watchSeconds > 0) {
+      updatePayload.video_last_activity_at = nowIso;
+    }
     if (opts.isCompleted && !existingLead.unlocked_class) {
       updatePayload.unlocked_class = true;
     }
@@ -622,6 +625,7 @@ export async function syncOrFindLeadRecord(
     watch_seconds: watchSeconds,
     unlocked_class: Boolean(opts.isCompleted),
     video_completed_at: opts.isCompleted ? nowIso : null,
+    video_last_activity_at: opts.isCompleted || watchSeconds > 0 ? nowIso : null,
     whatsapp_followup_status: "NOT_SENT",
     user_agent: `Masterclass Funnel | ${opts.device || "Web"}`,
   };
@@ -655,6 +659,189 @@ export async function syncOrFindLeadRecord(
 
   const finalLead = inserted || newLead;
   return { ok: true, leadId: finalLead.id, lead: finalLead };
+}
+
+export interface RecordActivityOptions {
+  registrationId?: string | null;
+  phone?: string | null;
+  watchSeconds?: number;
+  isCompleted?: boolean;
+  client?: any;
+}
+
+export interface RecordActivityResult {
+  ok: boolean;
+  leadId: string | null;
+  updated?: boolean;
+  error?: string;
+}
+
+/**
+ * Records verified active video playback activity in public.leads in CRM Supabase.
+ * Updates video_last_activity_at and increments watch_seconds if genuine advancement occurred.
+ * Uses registrationId as primary stable identifier before falling back to phone.
+ * Does not mark completed unless isCompleted is explicitly true.
+ */
+export async function recordLeadVideoActivity(
+  opts: RecordActivityOptions,
+): Promise<RecordActivityResult> {
+  const client = opts.client || getLeadsSupabaseClient();
+  const registrationId = opts.registrationId || null;
+  const rawPhone = opts.phone || null;
+  const watchSeconds = Math.round(opts.watchSeconds || 0);
+  const nowIso = new Date().toISOString();
+
+  if (!registrationId && !rawPhone) {
+    return { ok: false, leadId: null, error: "Missing registrationId and phone" };
+  }
+
+  try {
+    let existingLead: any = null;
+
+    // 1. Primary lookup by stable registrationId in CRM public.leads
+    if (registrationId) {
+      const { data: byId, error: idErr } = await client
+        .from("leads")
+        .select("id, phone, watch_seconds, unlocked_class, video_completed_at, video_last_activity_at")
+        .eq("id", registrationId)
+        .maybeSingle();
+
+      if (byId) {
+        existingLead = byId;
+      } else if (idErr) {
+        console.warn("[n8n.server] Lead activity ID lookup notice:", idErr.message);
+      }
+    }
+
+    // 2. Secondary lookup by clean phone only if not found by registrationId
+    if (!existingLead && rawPhone) {
+      const cleanPhone = formatCleanPhone(rawPhone);
+      if (cleanPhone) {
+        const { data: byPhone, error: phoneErr } = await client
+          .from("leads")
+          .select("id, phone, watch_seconds, unlocked_class, video_completed_at, video_last_activity_at")
+          .eq("phone", cleanPhone)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (byPhone) {
+          existingLead = byPhone;
+        } else if (phoneErr) {
+          console.warn("[n8n.server] Lead activity phone lookup notice:", phoneErr.message);
+        }
+      }
+    }
+
+    if (!existingLead) {
+      if (registrationId && rawPhone) {
+        const syncRes = await syncOrFindLeadRecord({
+          registrationId,
+          phone: rawPhone,
+          watchSeconds,
+          isCompleted: opts.isCompleted,
+          client,
+        });
+        if (syncRes.ok && syncRes.leadId) {
+          return { ok: true, leadId: syncRes.leadId, updated: true };
+        }
+      }
+      return { ok: false, leadId: null, error: "Lead record not found" };
+    }
+
+    const updatePayload: Record<string, any> = {
+      video_last_activity_at: nowIso,
+    };
+
+    if (watchSeconds > (Number(existingLead.watch_seconds) || 0)) {
+      updatePayload.watch_seconds = watchSeconds;
+    }
+
+    if (opts.isCompleted) {
+      if (!existingLead.unlocked_class) {
+        updatePayload.unlocked_class = true;
+      }
+      if (!existingLead.video_completed_at) {
+        updatePayload.video_completed_at = nowIso;
+      }
+    }
+
+    const { error: updateErr } = await client
+      .from("leads")
+      .update(updatePayload)
+      .eq("id", existingLead.id);
+
+    if (updateErr) {
+      console.warn("[n8n.server] recordLeadVideoActivity update error:", updateErr.message);
+      return { ok: false, leadId: existingLead.id, error: updateErr.message };
+    }
+
+    return { ok: true, leadId: existingLead.id, updated: true };
+  } catch (err: any) {
+    console.warn("[n8n.server] recordLeadVideoActivity exception:", err?.message);
+    return { ok: false, leadId: null, error: err?.message };
+  }
+}
+
+/**
+ * Fetches playback progress and completion directly from public.leads in CRM Supabase.
+ * Uses registrationId as primary identifier, falling back to phone.
+ */
+export async function getRemoteLeadProgress({
+  registrationId,
+  phone,
+  client,
+}: {
+  registrationId?: string | null;
+  phone?: string | null;
+  client?: any;
+}): Promise<{
+  ok: boolean;
+  progress: { lastPosition: number; isCompleted: boolean } | null;
+}> {
+  if (!registrationId && !phone) return { ok: false, progress: null };
+
+  const crmClient = client || getLeadsSupabaseClient();
+  let leadRow: any = null;
+
+  // 1. Primary lookup by stable registrationId
+  if (registrationId) {
+    const { data: byId } = await crmClient
+      .from("leads")
+      .select("id, watch_seconds, unlocked_class, video_completed_at")
+      .eq("id", registrationId)
+      .maybeSingle();
+    if (byId) leadRow = byId;
+  }
+
+  // 2. Secondary lookup by clean phone if not matched by registrationId
+  if (!leadRow && phone) {
+    const cleanPhone = formatCleanPhone(phone);
+    if (cleanPhone) {
+      const { data: byPhone } = await crmClient
+        .from("leads")
+        .select("id, watch_seconds, unlocked_class, video_completed_at")
+        .eq("phone", cleanPhone)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (byPhone) leadRow = byPhone;
+    }
+  }
+
+  if (leadRow) {
+    const isCompleted = Boolean(leadRow.unlocked_class || leadRow.video_completed_at);
+    const lastPosition = Number(leadRow.watch_seconds) || 0;
+    return {
+      ok: true,
+      progress: {
+        lastPosition,
+        isCompleted,
+      },
+    };
+  }
+
+  return { ok: false, progress: null };
 }
 
 /**
