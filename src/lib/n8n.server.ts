@@ -115,8 +115,7 @@ export const CRM_DEFAULT_KEY =
 
 /**
  * Secure server-side Supabase client dedicated to the Leads & WhatsApp CRM database.
- * CRITICAL: NEVER fall back to SUPABASE_URL here. That points to the website database
- * (xlyqrzcstkxdkyvdensc), which does NOT contain public.leads.
+ * Unified with SUPABASE_URL / LEADS_SUPABASE_URL pointing to the production database.
  */
 export function getLeadsSupabaseClient() {
   const url =
