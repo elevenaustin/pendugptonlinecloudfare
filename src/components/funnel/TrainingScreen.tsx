@@ -328,7 +328,7 @@ export function TrainingScreen() {
       return;
     }
 
-    if (isRedirectingRef.current) return;
+    if (isRedirectingRef.current && !force) return;
     isRedirectingRef.current = true;
     setIsRedirecting(true);
     completionTriggeredRef.current = true;
@@ -371,7 +371,7 @@ export function TrainingScreen() {
               completionStatus: true,
             },
           }),
-          new Promise((resolve) => setTimeout(resolve, 1500)),
+          new Promise((resolve) => setTimeout(resolve, 800)),
         ]);
       } catch (err) {
         console.warn("[TrainingScreen] Video completion sync notice:", err);
@@ -379,7 +379,54 @@ export function TrainingScreen() {
     }
 
     // Redirect to Class Pricing Details section under the exact required URL
-    navigate({ to: "/classfeesecrettunnel" });
+    try {
+      await navigate({ to: "/classfeesecrettunnel" });
+    } catch {
+      if (typeof window !== "undefined") {
+        window.location.href = "/classfeesecrettunnel";
+      }
+    }
+  };
+
+  const handlePricingButtonClick = () => {
+    // 1. Mark completed in localStorage immediately
+    try {
+      localStorage.setItem(completionKey, "true");
+      const saved = JSON.parse(localStorage.getItem(storageKey) || "{}");
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          ...saved,
+          complete: true,
+          progress: 1,
+          watched: Math.max(watchedRef.current, durationRef.current || 858),
+          lastPosition: durationRef.current || 858,
+        }),
+      );
+    } catch {}
+
+    // 2. Fire and forget server sync in background if needed
+    const regId = registrationIdRef.current;
+    const phone = userPhoneRef.current;
+    const completedPos = durationRef.current || 858;
+    if (regId || phone) {
+      saveRemoteProgress({
+        data: {
+          registrationId: regId || undefined,
+          phone: phone || undefined,
+          videoId: vimeoId,
+          lastPositionSeconds: completedPos,
+          completionStatus: true,
+        },
+      }).catch(() => {});
+    }
+
+    // 3. Immediately redirect without delay with fallback
+    navigate({ to: "/classfeesecrettunnel" }).catch(() => {
+      if (typeof window !== "undefined") {
+        window.location.href = "/classfeesecrettunnel";
+      }
+    });
   };
 
   const unmuteAudio = useCallback(async () => {
@@ -1042,14 +1089,14 @@ export function TrainingScreen() {
                 </div>
 
                 <button
-                  onClick={() => handleCompletionAndRedirect(true)}
-                  disabled={isRedirecting}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-full bg-gradient-to-r from-[#00F076] via-[#00f77b] to-[#00D668] px-8 sm:px-9 py-3.5 sm:py-4 text-xs sm:text-sm font-display font-black italic uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.7)] transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(0,240,118,0.9)] active:scale-[0.98] cursor-pointer disabled:opacity-80"
+                  type="button"
+                  onClick={handlePricingButtonClick}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-full bg-gradient-to-r from-[#00F076] via-[#00f77b] to-[#00D668] px-8 sm:px-9 py-3.5 sm:py-4 text-xs sm:text-sm font-display font-black italic uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.7)] transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(0,240,118,0.9)] active:scale-[0.98] cursor-pointer"
                 >
                   {isRedirecting ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin text-black" />
-                      <span>REDIRECTING TO CLASS PRICING...</span>
+                      <span>OPENING CLASS PRICING DETAILS...</span>
                     </>
                   ) : (
                     <>

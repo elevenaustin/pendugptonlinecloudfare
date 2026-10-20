@@ -94,12 +94,29 @@ export function NextStepScreen() {
         }
 
         // Central Server Authorization Check: query Supabase public.leads for genuine 95% completion
-        const serverAuth = await verifyAccess({
+        let serverAuth = await verifyAccess({
           data: {
             registrationId: reg.registrationId || null,
             phone: reg.whatsapp || null,
           },
         });
+
+        // Eliminate latency race condition: if the user just completed and redirected,
+        // retry once after 800ms before rejecting to allow Supabase write to finish
+        if (!serverAuth?.authorized) {
+          const isRecentlyCompleted =
+            localStorage.getItem(siteConfig.video.completionKey) === "true";
+          if (isRecentlyCompleted) {
+            await new Promise((resolve) => setTimeout(resolve, 800));
+            if (isCancelled) return;
+            serverAuth = await verifyAccess({
+              data: {
+                registrationId: reg.registrationId || null,
+                phone: reg.whatsapp || null,
+              },
+            });
+          }
+        }
 
         if (isCancelled) return;
 
