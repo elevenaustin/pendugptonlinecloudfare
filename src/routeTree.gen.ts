@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
+import { Route as ClassfeesecrettunnelRouteImport } from './routes/classfeesecrettunnel'
 import { Route as NextStepRouteImport } from './routes/next-step'
 import { Route as TrainingRouteImport } from './routes/training'
 
@@ -22,6 +23,11 @@ const IndexRoute = IndexRouteImport.update({
 const AdminRoute = AdminRouteImport.update({
   id: '/admin',
   path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ClassfeesecrettunnelRoute = ClassfeesecrettunnelRouteImport.update({
+  id: '/classfeesecrettunnel',
+  path: '/classfeesecrettunnel',
   getParentRoute: () => rootRouteImport,
 } as any)
 const NextStepRoute = NextStepRouteImport.update({
@@ -38,12 +44,14 @@ const TrainingRoute = TrainingRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/classfeesecrettunnel': typeof ClassfeesecrettunnelRoute
   '/next-step': typeof NextStepRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/classfeesecrettunnel': typeof ClassfeesecrettunnelRoute
   '/next-step': typeof NextStepRoute
   '/training': typeof TrainingRoute
 }
@@ -51,20 +59,29 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/classfeesecrettunnel': typeof ClassfeesecrettunnelRoute
   '/next-step': typeof NextStepRoute
   '/training': typeof TrainingRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/admin' | '/next-step' | '/training'
+  fullPaths:
+    '/' | '/admin' | '/classfeesecrettunnel' | '/next-step' | '/training'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/admin' | '/next-step' | '/training'
-  id: '__root__' | '/' | '/admin' | '/next-step' | '/training'
+  to: '/' | '/admin' | '/classfeesecrettunnel' | '/next-step' | '/training'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/classfeesecrettunnel'
+    | '/next-step'
+    | '/training'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  ClassfeesecrettunnelRoute: typeof ClassfeesecrettunnelRoute
   NextStepRoute: typeof NextStepRoute
   TrainingRoute: typeof TrainingRoute
 }
@@ -83,6 +100,13 @@ declare module '@tanstack/react-router' {
       path: '/admin'
       fullPath: '/admin'
       preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/classfeesecrettunnel': {
+      id: '/classfeesecrettunnel'
+      path: '/classfeesecrettunnel'
+      fullPath: '/classfeesecrettunnel'
+      preLoaderRoute: typeof ClassfeesecrettunnelRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/next-step': {
@@ -105,6 +129,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  ClassfeesecrettunnelRoute: ClassfeesecrettunnelRoute,
   NextStepRoute: NextStepRoute,
   TrainingRoute: TrainingRoute,
 }

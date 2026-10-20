@@ -34,6 +34,11 @@ describe("App routing", () => {
     expect(failedMatches(matches)).toEqual([]);
   });
 
+  it("loads the classfeesecrettunnel route without a loader error", async () => {
+    const matches = await loadAt("/classfeesecrettunnel");
+    expect(failedMatches(matches)).toEqual([]);
+  });
+
   it("loads an unknown path without a loader error", async () => {
     const matches = await loadAt("/this-route-does-not-exist");
     expect(failedMatches(matches)).toEqual([]);

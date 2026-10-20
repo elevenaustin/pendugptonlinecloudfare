@@ -53,6 +53,8 @@ export function TrainingScreen() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [progress, setProgress] = useState(0);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const isRedirectingRef = useRef(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
@@ -315,6 +317,71 @@ export function TrainingScreen() {
     track("video_complete");
   };
 
+  const handleCompletionAndRedirect = async (force = false) => {
+    const duration = durationRef.current || 0;
+    const genuineWatched = watchedRef.current;
+    const genuineRatio = duration > 0 ? genuineWatched / duration : progress;
+
+    // Strict Anti-Bypass Guard: Must have watched at least completionThreshold (95%)
+    if (genuineRatio < completionThreshold && !force) {
+      console.warn("Security notice: Video cannot be completed before reaching 95% threshold.");
+      return;
+    }
+
+    if (isRedirectingRef.current) return;
+    isRedirectingRef.current = true;
+    setIsRedirecting(true);
+    completionTriggeredRef.current = true;
+    setIsCompleted(true);
+    setProgress(1);
+
+    const completedPos =
+      duration > 0
+        ? duration
+        : Math.max(lastPositionRef.current, watchedRef.current);
+
+    // Save locally
+    try {
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          watched: Math.max(watchedRef.current, completedPos),
+          lastPosition: completedPos,
+          progress: 1,
+          complete: true,
+        }),
+      );
+      localStorage.setItem(completionKey, "true");
+    } catch {}
+
+    track("video_complete");
+
+    // Authoritative Server Sync: Ensure Supabase public.leads has unlocked_class and video_completed_at
+    const regId = registrationIdRef.current;
+    const phone = userPhoneRef.current;
+    if (regId || phone) {
+      try {
+        await Promise.race([
+          saveRemoteProgress({
+            data: {
+              registrationId: regId || undefined,
+              phone: phone || undefined,
+              videoId: vimeoId,
+              lastPositionSeconds: completedPos,
+              completionStatus: true,
+            },
+          }),
+          new Promise((resolve) => setTimeout(resolve, 1500)),
+        ]);
+      } catch (err) {
+        console.warn("[TrainingScreen] Video completion sync notice:", err);
+      }
+    }
+
+    // Redirect to Class Pricing Details section under the exact required URL
+    navigate({ to: "/classfeesecrettunnel" });
+  };
+
   const unmuteAudio = useCallback(async () => {
     if (!playerRef.current) return;
     try {
@@ -505,6 +572,10 @@ export function TrainingScreen() {
 
         if (p >= completionThreshold) {
           handleCompletion();
+          // If playback naturally finishes to the end (within 1.2s of video duration)
+          if (durationRef.current > 0 && currentSeconds >= durationRef.current - 1.2) {
+            handleCompletionAndRedirect();
+          }
         } else {
           persist(p, false, currentSeconds);
         }
@@ -519,7 +590,7 @@ export function TrainingScreen() {
         const genuineRatio =
           durationRef.current > 0 ? watchedRef.current / durationRef.current : progress;
         if (genuineRatio >= completionThreshold) {
-          handleCompletion();
+          handleCompletionAndRedirect();
         } else {
           // Re-snap to legitimate watched point if skipped
           if (playerRef.current) {
@@ -784,6 +855,25 @@ export function TrainingScreen() {
                 </div>
               )}
 
+              {/* Floating Redirecting Banner when Video Finishes Completely */}
+              {isRedirecting && (
+                <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-black/85 backdrop-blur-md p-6 text-center animate-reveal">
+                  <div className="grid h-16 w-16 place-items-center rounded-full bg-[#072416] border-2 border-[#00F076] text-[#00F076] shadow-[0_0_35px_rgba(0,240,118,0.6)] mb-4 animate-pulse">
+                    <CheckCircle2 className="h-8 w-8" />
+                  </div>
+                  <h3 className="font-display font-extrabold italic text-xl sm:text-2xl text-white">
+                    Training Video Completed!
+                  </h3>
+                  <p className="mt-2 text-xs sm:text-sm text-white/80 max-w-sm">
+                    Redirecting you to the Class Pricing Details section...
+                  </p>
+                  <div className="mt-4 flex items-center gap-2 text-xs text-[#00F076] font-mono font-bold">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#00F076]" />
+                    <span>Opening Class Pricing Tunnel...</span>
+                  </div>
+                </div>
+              )}
+
               {/* Center Big Play Button when Paused */}
               {!isPlaying && hasStarted && (
                 <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center bg-black/40 backdrop-blur-xs transition-opacity animate-reveal">
@@ -943,20 +1033,30 @@ export function TrainingScreen() {
                   </div>
                   <div>
                     <p className="text-sm sm:text-base font-display font-extrabold text-white leading-tight">
-                      Training completed!
+                      {isRedirecting ? "Training completed! Redirecting..." : "Training completed!"}
                     </p>
                     <p className="text-xs sm:text-sm text-[#00F076] font-semibold mt-0.5">
-                      Your Masterclass enrollment options are unlocked!
+                      Your Masterclass class pricing & enrollment options are unlocked!
                     </p>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => navigate({ to: "/next-step" })}
-                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-full bg-gradient-to-r from-[#00F076] via-[#00f77b] to-[#00D668] px-8 sm:px-9 py-3.5 sm:py-4 text-xs sm:text-sm font-display font-black italic uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.7)] transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(0,240,118,0.9)] active:scale-[0.98] cursor-pointer"
+                  onClick={() => handleCompletionAndRedirect(true)}
+                  disabled={isRedirecting}
+                  className="w-full sm:w-auto inline-flex items-center justify-center gap-2.5 rounded-full bg-gradient-to-r from-[#00F076] via-[#00f77b] to-[#00D668] px-8 sm:px-9 py-3.5 sm:py-4 text-xs sm:text-sm font-display font-black italic uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.7)] transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(0,240,118,0.9)] active:scale-[0.98] cursor-pointer disabled:opacity-80"
                 >
-                  <span>CONTINUE TO NEXT STEP</span>
-                  <ArrowRight className="h-4 w-4 stroke-[3]" />
+                  {isRedirecting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-black" />
+                      <span>REDIRECTING TO CLASS PRICING...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>ACCESS CLASS PRICING DETAILS</span>
+                      <ArrowRight className="h-4 w-4 stroke-[3]" />
+                    </>
+                  )}
                 </button>
               </>
             ) : (

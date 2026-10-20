@@ -109,7 +109,7 @@ export function NextStepScreen() {
           loadRazorpayScript().catch(() => {});
         } else {
           console.warn(
-            "[Security] Access to /next-step denied by server policy:",
+            "[Security] Access to /classfeesecrettunnel denied by server policy:",
             serverAuth?.reason,
           );
           // Purge fraudulent or stale completion keys from localStorage
@@ -135,6 +135,17 @@ export function NextStepScreen() {
       isCancelled = true;
     };
   }, [navigate, verifyAccess]);
+
+  // Auto-scroll to pricing section if requested via hash
+  useEffect(() => {
+    if (isAuthorized && isMounted) {
+      if (typeof window !== "undefined" && window.location.hash === "#pricing") {
+        setTimeout(() => {
+          pricingSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 300);
+      }
+    }
+  }, [isAuthorized, isMounted]);
 
   const triggerControlsAutoHide = () => {
     setShowControls(true);
@@ -472,6 +483,17 @@ export function NextStepScreen() {
               Watch this action plan video below. Discover how to build luxury websites without
               coding, get free domains & hosting, and close ₹25k–₹50k client deals.
             </p>
+            {/* Quick Link directly to Class Fee & Pricing Details */}
+            <div className="mt-4 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={scrollToPricing}
+                className="inline-flex items-center gap-2 rounded-full bg-[#00F076]/15 hover:bg-[#00F076]/25 border border-[#00F076]/50 px-5 py-2 text-xs font-display font-extrabold text-[#00F076] transition-all cursor-pointer shadow-[0_0_20px_rgba(0,240,118,0.25)] active:scale-95"
+              >
+                <span>Jump to Class Fee & Pricing Details</span>
+                <span className="text-base">↓</span>
+              </button>
+            </div>
           </div>
 
           {/* Video Preview Section (Clean, Cinema-Grade Player with Zero Clutter & Zero Vimeo Icons) */}
@@ -707,6 +729,7 @@ export function NextStepScreen() {
             {/* Pricing Section with 2-Second Smooth Reveal Animation */}
             <div
               ref={pricingSectionRef}
+              id="pricing"
               className={`transition-all duration-1000 ease-out transform ${
                 showPricing
                   ? "opacity-100 translate-y-0 scale-100"

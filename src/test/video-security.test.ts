@@ -80,4 +80,56 @@ describe("Video Funnel Anti-Bypass & Security Invariants", () => {
 
     expect(canAccessNextStep).toBe(false);
   });
+
+  it("blocks /classfeesecrettunnel access if user has not completely watched the training video", () => {
+    localStorage.setItem(
+      registrationKey,
+      JSON.stringify({ whatsapp: "9876543210", registered: true }),
+    );
+
+    // Incomplete watch progress (e.g. 50%)
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ watched: 400, lastPosition: 400, progress: 0.5, complete: false }),
+    );
+
+    const reg = JSON.parse(localStorage.getItem(registrationKey) || "null");
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+    const isCompleted = localStorage.getItem(completionKey) === "true";
+    const progressValue = typeof saved?.progress === "number" ? saved.progress : 0;
+
+    const canAccessClassFeeTunnel =
+      Boolean(reg?.registered) &&
+      isCompleted &&
+      progressValue >= completionThreshold;
+
+    expect(canAccessClassFeeTunnel).toBe(false);
+  });
+
+  it("allows /classfeesecrettunnel access only when user has completely watched the training video", () => {
+    localStorage.setItem(
+      registrationKey,
+      JSON.stringify({ whatsapp: "9876543210", registered: true }),
+    );
+
+    // Genuinely watched 100% of the training video
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({ watched: 858, lastPosition: 858, progress: 1.0, complete: true }),
+    );
+    localStorage.setItem(completionKey, "true");
+
+    const reg = JSON.parse(localStorage.getItem(registrationKey) || "null");
+    const saved = JSON.parse(localStorage.getItem(storageKey) || "null");
+    const isCompleted = localStorage.getItem(completionKey) === "true";
+    const progressValue = typeof saved?.progress === "number" ? saved.progress : 0;
+
+    const canAccessClassFeeTunnel =
+      Boolean(reg?.registered) &&
+      isCompleted &&
+      progressValue >= completionThreshold;
+
+    expect(canAccessClassFeeTunnel).toBe(true);
+  });
 });
+
