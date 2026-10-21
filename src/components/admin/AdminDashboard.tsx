@@ -13,6 +13,7 @@ import {
   syncRegistrationsToSupabaseLeads,
   exportContactsOnlyCsvData,
   exportPhoneNumbersTxtData,
+  adminSkipVideoWatch,
 } from "@/lib/admin.functions";
 import {
   UploadCloud,
@@ -20,6 +21,7 @@ import {
   PlayCircle,
   Video,
   Sparkles,
+  Zap,
   CreditCard,
   CheckCircle2,
   IndianRupee,
@@ -646,6 +648,14 @@ function AdminOverviewTab({
             <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
             <span>Refresh</span>
           </button>
+
+          <button
+            onClick={() => onNavigate("registrations")}
+            className="flex items-center gap-1.5 rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-bold text-emerald-300 transition hover:bg-emerald-500/25"
+          >
+            <Zap className="h-3.5 w-3.5 fill-current" />
+            <span>Skip Video Tool</span>
+          </button>
         </div>
       </div>
 
@@ -968,6 +978,54 @@ function AdminRegistrationsTab({
   const [copyFeedbackToast, setCopyFeedbackToast] = useState<string | null>(null);
   const [copiedRowId, setCopiedRowId] = useState<string | null>(null);
   const exportDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Admin Supervision: Skip Full Video Watch States
+  const [skipPhoneInput, setSkipPhoneInput] = useState("");
+  const [skipCountryCode, setSkipCountryCode] = useState("+91");
+  const [skippingVideo, setSkippingVideo] = useState(false);
+  const [skipResultMsg, setSkipResultMsg] = useState<string | null>(null);
+  const [skipResultType, setSkipResultType] = useState<"success" | "error" | null>(null);
+
+  const handleAdminSkipVideo = async (targetPhone?: string) => {
+    const phoneToSkip = (targetPhone || skipPhoneInput).trim();
+    const digits = phoneToSkip.replace(/\D/g, "");
+    if (digits.length < 6) {
+      setSkipResultMsg("Please enter a valid phone number with at least 6 digits");
+      setSkipResultType("error");
+      return;
+    }
+
+    try {
+      setSkippingVideo(true);
+      setSkipResultMsg(null);
+
+      const res = await (adminSkipVideoWatch as any)({
+        data: {
+          authToken,
+          phone: phoneToSkip,
+          countryCode: skipCountryCode || "+91",
+        },
+      });
+
+      if (res && res.ok) {
+        setSkipResultMsg(res.message || `Successfully skipped video watch for ${phoneToSkip}`);
+        setSkipResultType("success");
+        if (!targetPhone) {
+          setSkipPhoneInput("");
+        }
+        // Immediately refresh leads table to show 100% video completed
+        fetchRegistrations(true);
+      } else {
+        setSkipResultMsg(res?.error || "Failed to skip video watch");
+        setSkipResultType("error");
+      }
+    } catch (err: any) {
+      setSkipResultMsg(err?.message || "Error executing skip video request");
+      setSkipResultType("error");
+    } finally {
+      setSkippingVideo(false);
+    }
+  };
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -1509,6 +1567,104 @@ function AdminRegistrationsTab({
             {counts.paid || 0}
           </span>
         </button>
+      </div>
+
+      {/* Admin Supervision: Skip / Fast-Track Full Video Watch Tool */}
+      <div className="rounded-2xl border border-emerald-500/40 bg-gradient-to-r from-[#03150d] via-[#041c11] to-[#03150d] p-4 sm:p-5 shadow-[0_4px_25px_rgba(0,240,118,0.12)]">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="grid h-7 w-7 place-items-center rounded-lg bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shadow-sm shadow-emerald-500/30">
+                <Zap className="h-4 w-4" />
+              </div>
+              <h3 className="font-display font-bold text-sm sm:text-base text-white tracking-wide">
+                Admin Supervision: Skip Full Video Watch (Testing & Fast-Track)
+              </h3>
+            </div>
+            <p className="mt-1 text-xs text-zinc-400 max-w-2xl">
+              Enter any student or test mobile number to immediately mark the video as 100% watched (858s) and unlock class pricing access across both databases.
+            </p>
+          </div>
+
+          {/* Phone Input & Skip Button */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex items-center rounded-lg border border-emerald-950/80 bg-black/60 px-2.5 py-1.5 focus-within:border-emerald-500">
+              <select
+                value={skipCountryCode}
+                onChange={(e) => setSkipCountryCode(e.target.value)}
+                className="bg-transparent text-xs text-zinc-300 outline-none pr-1 cursor-pointer"
+              >
+                <option value="+91" className="bg-zinc-900">+91</option>
+                <option value="+1" className="bg-zinc-900">+1</option>
+                <option value="+44" className="bg-zinc-900">+44</option>
+                <option value="+971" className="bg-zinc-900">+971</option>
+                <option value="+966" className="bg-zinc-900">+966</option>
+                <option value="+61" className="bg-zinc-900">+61</option>
+                <option value="+65" className="bg-zinc-900">+65</option>
+                <option value="+92" className="bg-zinc-900">+92</option>
+              </select>
+              <span className="text-zinc-600 mx-1">|</span>
+              <input
+                type="text"
+                placeholder="Enter mobile number"
+                value={skipPhoneInput}
+                onChange={(e) => setSkipPhoneInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAdminSkipVideo();
+                  }
+                }}
+                className="bg-transparent text-xs text-white placeholder-zinc-500 outline-none w-36 sm:w-44 font-mono"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleAdminSkipVideo()}
+              disabled={skippingVideo || !skipPhoneInput.trim()}
+              className="flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-bold text-black shadow-md shadow-emerald-500/20 hover:bg-emerald-400 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer"
+            >
+              {skippingVideo ? (
+                <>
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  <span>Unlocking...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="h-3.5 w-3.5 fill-current" />
+                  <span>Skip Video Watch</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {skipResultMsg && (
+          <div
+            className={`mt-3 flex items-center justify-between rounded-lg p-2.5 text-xs font-medium border ${
+              skipResultType === "success"
+                ? "border-emerald-500/40 bg-emerald-950/40 text-emerald-300"
+                : "border-red-900/40 bg-red-950/40 text-red-300"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {skipResultType === "success" ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="h-4 w-4 text-red-400 shrink-0" />
+              )}
+              <span>{skipResultMsg}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSkipResultMsg(null)}
+              className="text-zinc-500 hover:text-zinc-300 ml-2"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Filter & Action Bar */}
@@ -2149,13 +2305,30 @@ function AdminRegistrationsTab({
 
                     {/* Action */}
                     <td className="px-3 py-3 text-right">
-                      <button
-                        onClick={() => setSelectedRegId(row.id)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-2.5 py-1 text-[11px] font-medium text-emerald-400 hover:bg-emerald-900/60 transition"
-                      >
-                        <Eye className="h-3 w-3" />
-                        <span>CRM & Notes</span>
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        {!row.videoCompleted && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAdminSkipVideo(row.customerPhone);
+                            }}
+                            disabled={skippingVideo}
+                            title="Skip video watch for this number (Supervision)"
+                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-[11px] font-semibold text-emerald-300 hover:bg-emerald-500/25 transition disabled:opacity-40"
+                          >
+                            <Zap className="h-3 w-3 fill-current" />
+                            <span>Skip Video</span>
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setSelectedRegId(row.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-emerald-900/40 bg-emerald-950/30 px-2.5 py-1 text-[11px] font-medium text-emerald-400 hover:bg-emerald-900/60 transition"
+                        >
+                          <Eye className="h-3 w-3" />
+                          <span>CRM & Notes</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

@@ -15,7 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { siteConfig } from "@/config/site";
-import { registrationSchema, submitRegistration } from "@/lib/leads.functions";
+import { registrationSchema, submitRegistration, checkExistingContact } from "@/lib/leads.functions";
 import { track } from "@/lib/analytics";
 import { BrandLogo } from "@/components/common/BrandLogo";
 import { RegistrationSkeleton } from "@/components/common/Skeleton";
@@ -63,6 +63,7 @@ const countries: Country[] = [
 export function RegistrationScreen() {
   const navigate = useNavigate();
   const registerFn = useServerFn(submitRegistration);
+  const checkContactFn = useServerFn(checkExistingContact);
 
   const [isReady, setIsReady] = useState(false);
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -76,13 +77,20 @@ export function RegistrationScreen() {
 
   const [errors, setErrors] = useState<{ whatsapp?: string }>({});
   const [loading, setLoading] = useState(false);
+  const [checkingContact, setCheckingContact] = useState(false);
+  const [contactPrompt, setContactPrompt] = useState<string | null>(null);
 
-  // If already registered from a previous session or same browser, skip initial questions and proceed straight to training!
+  // If already registered from a previous session or same browser, skip initial questions and proceed straight to training or class pricing!
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(siteConfig.video.registrationKey) || "null");
       if (saved && saved.registered) {
-        navigate({ to: "/training" });
+        const isComplete = localStorage.getItem(siteConfig.video.completionKey) === "true";
+        if (isComplete) {
+          navigate({ to: "/classfeesecrettunnel" });
+        } else {
+          navigate({ to: "/training" });
+        }
         return;
       }
     } catch {
@@ -113,16 +121,92 @@ export function RegistrationScreen() {
     return <RegistrationSkeleton />;
   }
 
-  const handleStep1Submit = (e?: React.FormEvent) => {
+  const handleStep1Submit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const digits = whatsapp.replace(/\D/g, "");
-    if (digits.length < 7) {
+    if (digits.length < 6) {
       setErrors({ whatsapp: "Please enter a valid mobile number" });
       return;
     }
     setErrors({});
-    setStep(2);
-    track("funnel_step_1_completed", { country: selectedCountry.code });
+    setCheckingContact(true);
+    setContactPrompt(null);
+
+    try {
+      // Step 1: Detect if contact was previously registered in records
+      const res = await checkContactFn({
+        data: {
+          countryCode: selectedCountry.code,
+          whatsapp: digits,
+        },
+      });
+
+      if (res && res.exists) {
+        // Contact is already registered!
+        // Do NOT let the user submit details again. Restore progress and redirect directly!
+        const lastPos = res.lastPositionSeconds || 0;
+        const isComplete = Boolean(res.isCompleted);
+
+        try {
+          localStorage.setItem(
+            siteConfig.video.registrationKey,
+            JSON.stringify({
+              registered: true,
+              registrationId: res.registrationId,
+              registeredAt: new Date().toISOString(),
+              countryCode: selectedCountry.code,
+              whatsapp,
+              suffix: whatsapp.slice(-4),
+            }),
+          );
+
+          localStorage.setItem(
+            siteConfig.video.storageKey,
+            JSON.stringify({
+              watched: lastPos,
+              lastPosition: lastPos,
+              progress: isComplete ? 1 : Math.min(1, lastPos / 858),
+              complete: isComplete,
+            }),
+          );
+
+          if (isComplete) {
+            localStorage.setItem(siteConfig.video.completionKey, "true");
+          }
+        } catch {
+          /* ignore */
+        }
+
+        const msg = isComplete
+          ? "This contact has already completed the training video! Taking you directly to class options..."
+          : lastPos > 0
+          ? `Welcome back! This contact is already registered. Resuming from where you left off (${Math.floor(lastPos / 60)}m ${Math.floor(lastPos % 60)}s)...`
+          : "Welcome back! This contact is already registered. Loading your masterclass session...";
+
+        setContactPrompt(msg);
+        track("funnel_returning_contact_detected", { country: selectedCountry.code, completed: isComplete });
+
+        // Redirect directly to training or class fee secret tunnel
+        setTimeout(() => {
+          if (isComplete) {
+            navigate({ to: "/classfeesecrettunnel" });
+          } else {
+            navigate({ to: "/training" });
+          }
+        }, 1100);
+        return;
+      }
+
+      // New unique contact: proceed to Step 2
+      setStep(2);
+      track("funnel_step_1_completed", { country: selectedCountry.code });
+    } catch (err) {
+      console.warn("Contact verification notice:", err);
+      // Fallback: proceed to step 2 if offline/network timeout
+      setStep(2);
+    } finally {
+      setCheckingContact(false);
+    }
   };
 
   const handleGenderSelect = (selectedGender: string) => {
@@ -311,15 +395,32 @@ export function RegistrationScreen() {
                   {errors.whatsapp && (
                     <p className="mt-2 pl-3 text-xs text-rose-400 font-medium">{errors.whatsapp}</p>
                   )}
+
+                  {contactPrompt && (
+                    <div className="mt-3 flex items-start gap-2.5 rounded-2xl border border-[#00F076]/40 bg-[#00F076]/10 p-3.5 text-xs sm:text-sm text-[#00F076] animate-reveal shadow-[0_0_20px_rgba(0,240,118,0.15)]">
+                      <Sparkles className="h-4 w-4 shrink-0 text-[#00F076] mt-0.5 animate-pulse" />
+                      <div className="flex-1 font-medium leading-relaxed">{contactPrompt}</div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Big Rich Electric Emerald CTA Button */}
                 <button
                   type="submit"
-                  className="group mt-4 w-full flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] py-3.5 sm:py-4 text-sm font-display font-extrabold italic uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.45)] transition-all hover:opacity-95 hover:shadow-[0_0_40px_rgba(0,240,118,0.65)] active:scale-[0.99] cursor-pointer"
+                  disabled={checkingContact}
+                  className="group mt-4 w-full flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#00F076] to-[#00D668] py-3.5 sm:py-4 text-sm font-display font-extrabold italic uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.45)] transition-all hover:opacity-95 hover:shadow-[0_0_40px_rgba(0,240,118,0.65)] active:scale-[0.99] cursor-pointer disabled:opacity-75 disabled:cursor-not-allowed"
                 >
-                  <span>CONTINUE</span>
-                  <ArrowRight className="h-4 w-4 stroke-[2.5] transition-transform group-hover:translate-x-1" />
+                  {checkingContact ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-black" />
+                      <span>CHECKING CONTACT...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>CONTINUE</span>
+                      <ArrowRight className="h-4 w-4 stroke-[2.5] transition-transform group-hover:translate-x-1" />
+                    </>
+                  )}
                 </button>
               </form>
             </div>

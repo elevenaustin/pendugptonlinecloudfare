@@ -132,8 +132,8 @@ export function TrainingScreen() {
       setIsCompleted(false);
     }
 
-    // Also fetch remote progress from Supabase if registrationId is present
-    if (regId) {
+    // Also fetch remote progress from Supabase if registrationId or phone is present
+    if (regId || userPhoneRef.current) {
       fetchRemoteProgress({
         data: {
           registrationId: regId,
@@ -159,6 +159,14 @@ export function TrainingScreen() {
               lastPositionRef.current = res.progress.lastPosition;
               if (res.progress.lastPosition > watchedRef.current) {
                 watchedRef.current = res.progress.lastPosition;
+              }
+              // If player is already initialized, resume immediately from remote position
+              if (playerRef.current && res.progress.lastPosition > 1) {
+                try {
+                  playerRef.current.setCurrentTime(res.progress.lastPosition);
+                } catch {
+                  /* player might still be loading */
+                }
               }
             }
           }

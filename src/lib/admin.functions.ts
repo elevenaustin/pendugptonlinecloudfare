@@ -1465,3 +1465,180 @@ export const exportOrdersCsvData = createServerFn({ method: "POST" })
       return { ok: false, error: err.message };
     }
   });
+
+export const adminSkipVideoSchema = z.object({
+  authToken: z.string().min(1, "Authentication token is required"),
+  phone: z.string().trim().min(6, "Please enter a valid phone number"),
+  countryCode: z.string().default("+91"),
+});
+
+export type AdminSkipVideoInput = z.infer<typeof adminSkipVideoSchema>;
+
+/**
+ * Core business logic to bypass / skip the full video watch requirement for any phone number (ADMIN SUPERVISION ONLY).
+ * Sets watch_seconds = 858, unlocked_class = true, and video_completed_at = now() across both CRM leads and website registrations.
+ */
+export async function executeAdminSkipVideoWatch({
+  authToken,
+  phone,
+  countryCode = "+91",
+  supabaseClient,
+  crmClientOverride,
+}: {
+  authToken: string;
+  phone: string;
+  countryCode?: string;
+  supabaseClient?: any;
+  crmClientOverride?: any;
+}) {
+  try {
+    await assertAdminAuth(authToken);
+
+    const rawWhatsapp = (phone || "").replace(/\D/g, "");
+    if (!rawWhatsapp || rawWhatsapp.length < 6) {
+      return { ok: false, error: "Please enter a valid phone number with at least 6 digits" };
+    }
+
+    const { normalizeToE164, formatCleanPhone, getLeadsSupabaseClient } = await import("./n8n.server");
+    const canonicalPhone = normalizeToE164(rawWhatsapp, countryCode);
+    const cleanPhone = formatCleanPhone(rawWhatsapp, countryCode);
+    const nowIso = new Date().toISOString();
+
+    // 1. Update or create lead in CRM Supabase (gifxzzrbpukpxsvmhokj)
+    const crmClient = crmClientOverride || getLeadsSupabaseClient();
+    let crmLeadId: string | null = null;
+    try {
+      const phoneCandidates = Array.from(new Set([canonicalPhone, cleanPhone, rawWhatsapp])).filter(Boolean);
+      const { data: existingLead } = await crmClient
+        .from("leads")
+        .select("id")
+        .in("phone", phoneCandidates)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingLead?.id) {
+        crmLeadId = existingLead.id;
+        await crmClient
+          .from("leads")
+          .update({
+            watch_seconds: 858,
+            unlocked_class: true,
+            video_completed_at: nowIso,
+            video_last_activity_at: nowIso,
+          })
+          .eq("id", crmLeadId);
+      } else {
+        crmLeadId = crypto.randomUUID();
+        await crmClient.from("leads").insert({
+          id: crmLeadId,
+          phone: cleanPhone || rawWhatsapp,
+          phone_canonical: canonicalPhone,
+          watch_seconds: 858,
+          unlocked_class: true,
+          whatsapp_followup_status: "NOT_SENT",
+          video_completed_at: nowIso,
+          video_last_activity_at: nowIso,
+          gender: "unspecified",
+          has_laptop: "yes",
+          user_agent: "Admin Supervision Fast-Track",
+        });
+      }
+    } catch (crmErr: any) {
+      console.warn("[adminSkipVideoWatch] CRM update notice:", crmErr?.message);
+    }
+
+    // 2. Update or create registration in Website Supabase (xlyqrzcstkxdkyvdensc)
+    let supabaseAdmin = supabaseClient;
+    if (!supabaseAdmin) {
+      const dbModule = await import("@/integrations/supabase/client.server");
+      supabaseAdmin = dbModule.supabaseAdmin;
+    }
+
+    let registrationId: string | null = null;
+    try {
+      const phoneFilter = cleanPhone !== rawWhatsapp
+        ? `phone_number.eq.${rawWhatsapp},phone_number.eq.${cleanPhone}`
+        : `phone_number.eq.${rawWhatsapp}`;
+
+      const { data: regRows } = await supabaseAdmin
+        .from("registrations")
+        .select("id")
+        .or(phoneFilter)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (regRows && regRows.length > 0) {
+        registrationId = regRows[0].id;
+      } else {
+        const { data: newReg } = await supabaseAdmin
+          .from("registrations")
+          .insert({
+            phone_country_code: countryCode,
+            phone_number: rawWhatsapp,
+            device_availability: "yes",
+          })
+          .select("id")
+          .single();
+
+        if (newReg?.id) {
+          registrationId = newReg.id;
+        }
+      }
+
+      // Upsert video_progress and funnel_events
+      if (registrationId) {
+        try {
+          await supabaseAdmin.from("video_progress").upsert(
+            {
+              registration_id: registrationId,
+              video_id: "1126786026",
+              last_position_seconds: 858,
+              completion_status: true,
+              video_last_activity_at: nowIso,
+              updated_at: nowIso,
+            },
+            { onConflict: "registration_id,video_id" },
+          );
+        } catch {
+          /* video_progress optional */
+        }
+
+        try {
+          await supabaseAdmin.from("funnel_events").insert({
+            registration_id: registrationId,
+            event_name: "admin_skipped_video_watch",
+          });
+        } catch {
+          /* funnel_events optional */
+        }
+      }
+    } catch (webDbErr: any) {
+      console.warn("[adminSkipVideoWatch] Website DB update notice:", webDbErr?.message);
+    }
+
+    return {
+      ok: true,
+      phone: canonicalPhone || rawWhatsapp,
+      cleanPhone: cleanPhone || rawWhatsapp,
+      registrationId,
+      crmLeadId,
+      watchSeconds: 858,
+      unlockedClass: true,
+      message: `Successfully marked 100% watched (858s) and skipped video for ${canonicalPhone || rawWhatsapp}`,
+    };
+  } catch (err: any) {
+    console.error("adminSkipVideoWatch error:", err);
+    return { ok: false, error: err.message || "Failed to skip video watch for number" };
+  }
+}
+
+/**
+ * Server function to bypass / skip the full video watch requirement for any phone number (ADMIN SUPERVISION ONLY).
+ * Sets watch_seconds = 858, unlocked_class = true, and video_completed_at = now() across both CRM leads and website registrations.
+ */
+export const adminSkipVideoWatch = createServerFn({ method: "POST" })
+  .validator((data: unknown) => adminSkipVideoSchema.parse(data))
+  .handler(async ({ data }) => {
+    return executeAdminSkipVideoWatch(data);
+  });

@@ -20,6 +20,133 @@ export const registrationSchema = z.object({
 
 export type RegistrationInput = z.infer<typeof registrationSchema>;
 
+export const checkExistingContactSchema = z.object({
+  countryCode: z.string().default("+91"),
+  whatsapp: z.string().trim().min(6, "Please enter a valid mobile number"),
+});
+
+export type CheckExistingContactInput = z.infer<typeof checkExistingContactSchema>;
+
+/**
+ * Core business logic to check if a contact is already registered and retrieve saved video progress.
+ */
+export async function executeCheckExistingContact({
+  countryCode = "+91",
+  whatsapp,
+  supabaseClient,
+  crmClientOverride,
+}: {
+  countryCode?: string;
+  whatsapp: string;
+  supabaseClient?: any;
+  crmClientOverride?: any;
+}) {
+  const rawWhatsapp = (whatsapp || "").replace(/\D/g, "");
+  if (!rawWhatsapp || rawWhatsapp.length < 6) {
+    return { exists: false, lastPositionSeconds: 0, isCompleted: false };
+  }
+
+  try {
+    const { normalizeToE164, formatCleanPhone, getLeadsSupabaseClient } = await import("./n8n.server");
+    const canonicalPhone = normalizeToE164(rawWhatsapp, countryCode);
+    const cleanPhone = formatCleanPhone(rawWhatsapp, countryCode);
+
+    let supabaseAdmin = supabaseClient;
+    if (!supabaseAdmin) {
+      const dbModule = await import("@/integrations/supabase/client.server");
+      supabaseAdmin = dbModule.supabaseAdmin;
+    }
+
+    // 1. Primary lookup in website registrations
+    const phoneFilter = cleanPhone !== rawWhatsapp
+      ? `phone_number.eq.${rawWhatsapp},phone_number.eq.${cleanPhone}`
+      : `phone_number.eq.${rawWhatsapp}`;
+
+    const { data: regRows } = await supabaseAdmin
+      .from("registrations")
+      .select("id, phone_country_code, phone_number, gender, device_availability, created_at, video_progress(last_position_seconds, completion_status)")
+      .or(phoneFilter)
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    const reg = regRows && regRows.length > 0 ? regRows[0] : null;
+
+    // 2. Lookup in CRM public.leads
+    let crmLead: any = null;
+    try {
+      const crmClient = crmClientOverride || getLeadsSupabaseClient();
+      const phoneCandidates = Array.from(new Set([canonicalPhone, cleanPhone, rawWhatsapp])).filter(Boolean);
+      const { data: leadRows } = await crmClient
+        .from("leads")
+        .select("id, phone, watch_seconds, unlocked_class, video_completed_at, gender, has_laptop")
+        .in("phone", phoneCandidates)
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+      if (leadRows && leadRows.length > 0) {
+        crmLead = leadRows[0];
+      }
+    } catch (crmErr) {
+      console.warn("[checkExistingContact] CRM lead lookup notice:", crmErr);
+    }
+
+    // If either record was found, the contact is already registered
+    if (reg || crmLead) {
+      const vidProgress = reg?.video_progress
+        ? Array.isArray(reg.video_progress)
+          ? reg.video_progress[0]
+          : reg.video_progress
+        : null;
+
+      const vidSec = Number(vidProgress?.last_position_seconds) || 0;
+      const crmSec = Number(crmLead?.watch_seconds) || 0;
+      const lastPositionSeconds = Math.max(vidSec, crmSec);
+
+      const isCompleted = Boolean(
+        vidProgress?.completion_status ||
+        crmLead?.unlocked_class ||
+        crmLead?.video_completed_at ||
+        lastPositionSeconds >= 815,
+      );
+
+      return {
+        exists: true,
+        registrationId: reg?.id || crmLead?.id || null,
+        lastPositionSeconds,
+        isCompleted,
+        gender: reg?.gender || crmLead?.gender || null,
+        device: reg?.device_availability || crmLead?.has_laptop || null,
+        message: isCompleted
+          ? "You have already completed the training video! Redirecting to class fee options..."
+          : "This contact is already registered. Resuming your video training where you left off...",
+      };
+    }
+
+    return {
+      exists: false,
+      lastPositionSeconds: 0,
+      isCompleted: false,
+    };
+  } catch (err: any) {
+    console.warn("[checkExistingContact] Exception:", err?.message);
+    return {
+      exists: false,
+      lastPositionSeconds: 0,
+      isCompleted: false,
+    };
+  }
+}
+
+/**
+ * Server function to check if a contact is already registered and retrieve saved video progress.
+ * If contact exists, prevents duplicate detail submission and enables session resume.
+ */
+export const checkExistingContact = createServerFn({ method: "POST" })
+  .validator((data: unknown) => checkExistingContactSchema.parse(data))
+  .handler(async ({ data }) => {
+    return executeCheckExistingContact(data);
+  });
+
 /**
  * Server function to register training attendees.
  */
