@@ -55,7 +55,7 @@ import { verifyNextStepAccess } from "@/lib/video.functions";
 export function NextStepScreen() {
   const navigate = useNavigate();
   const verifyAccess = useServerFn(verifyNextStepAccess);
-  const { recorded, live } = siteConfig.courses;
+  const { recorded } = siteConfig.courses;
   const nextStepVimeoId = siteConfig.nextStepVideo?.vimeoId || "1232620094";
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
@@ -757,163 +757,78 @@ export function NextStepScreen() {
               <div className="text-center max-w-2xl mx-auto mb-8 sm:mb-10">
                 <div className="inline-flex items-center gap-2 rounded-full border border-[#00F076]/30 bg-[#072416] px-4 py-1 text-xs font-bold text-[#00F076] shadow-[0_0_15px_rgba(0,240,118,0.2)] mb-3">
                   <Flame className="h-3.5 w-3.5 text-amber-400 fill-amber-400" />
-                  <span>Limited Batch Enrollment Open</span>
+                  <span>Official Masterclass Enrollment Open</span>
                 </div>
                 <h2 className="font-display font-extrabold italic text-2xl sm:text-3xl md:text-4xl text-white tracking-tight">
-                  Choose Your <span className="text-[#00F076]">Masterclass Option</span>
+                  Enroll in the <span className="text-[#00F076]">AI Website Masterclass</span>
                 </h2>
                 <p className="mt-2 text-xs sm:text-sm text-white/70 font-medium">
-                  Select between direct interactive live mentorship or self-paced video modules.
+                  Instant lifetime access to the complete no-code curriculum, templates, prompt vault, and freelance roadmap.
                 </p>
               </div>
 
-              {/* The Two Attractive Pricing Cards: Option 1 (Live) & Option 2 (Recorded) - Responsive Mobile-First Stack & Desktop Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 sm:gap-6 md:gap-8 max-w-4xl mx-auto items-stretch font-sans">
-                {/* ================= OPTION 1: LIVE MASTERCLASS (FEATURED WITH INTENSE GLOW) ================= */}
-                <div className="relative flex flex-col justify-between rounded-[24px] sm:rounded-[32px] md:rounded-[36px] border-2 border-[#00F076] bg-gradient-to-b from-[#092e1b] via-[#05170e] to-[#020805] p-5 sm:p-7 md:p-8 shadow-[0_0_45px_-5px_rgba(0,240,118,0.45)] transition-all">
+              {/* ================= MASTERCLASS PRICING CARD: FLAT 2499 (SLASHED FROM REAL PRICE 5999) ================= */}
+              <div className="max-w-xl mx-auto items-stretch font-sans">
+                <div className="relative flex flex-col justify-between rounded-[24px] sm:rounded-[32px] md:rounded-[36px] border-2 border-[#00F076] bg-gradient-to-b from-[#092e1b] via-[#05170e] to-[#020805] p-6 sm:p-8 md:p-9 shadow-[0_0_50px_-5px_rgba(0,240,118,0.45)] transition-all">
                   {/* Glowing ambient halo behind badge */}
                   <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-48 sm:w-64 h-14 sm:h-20 bg-[#00F076]/25 blur-xl rounded-full pointer-events-none" />
 
                   {/* Clean Top Ribbon Badge */}
-                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap flex items-center gap-1.5 rounded-full bg-[#00F076] px-3.5 sm:px-4 py-1 text-[9.5px] sm:text-[11px] font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(0,240,118,0.95)] ring-1 ring-white/40">
-                    <span className="h-2 w-2 rounded-full bg-red-600 animate-live-dot shrink-0" />
-                    <span>🔥 LIVE BATCH • 3 SEATS LEFT</span>
+                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap flex items-center gap-1.5 rounded-full bg-[#00F076] px-4 py-1 text-[10px] sm:text-[11.5px] font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(0,240,118,0.95)] ring-1 ring-white/40">
+                    <span className="text-[11px] sm:text-xs">✦</span>
+                    <span>⭐ SPECIAL OFFER • 58% OFF</span>
                   </div>
 
                   <div>
-                    {/* Header Info */}
+                    {/* Header Info - NO 'recorded' in Title */}
                     <div className="flex items-center justify-between mt-1 sm:mt-2">
                       <div>
                         <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#00F076]">
-                          OPTION 1
+                          FULL ENROLLMENT ACCESS
                         </span>
-                        <h3 className="font-display font-extrabold italic text-lg sm:text-2xl text-white mt-0.5 leading-tight">
-                          Live Masterclass
+                        <h3 className="font-display font-extrabold italic text-2xl sm:text-3xl text-white mt-0.5 leading-tight">
+                          {recorded.name}
                         </h3>
                       </div>
-                      <span className="rounded-lg sm:rounded-xl border border-red-500/40 bg-red-950/60 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-extrabold uppercase tracking-wider text-red-400 shrink-0">
-                        {live.discount}
-                      </span>
-                    </div>
-
-                    {/* Price with Original Crossed Price & /one-time tag */}
-                    <div className="mt-3 sm:mt-5 flex items-baseline gap-2 sm:gap-2.5 flex-wrap">
-                      <span className="font-display font-extrabold italic text-3xl sm:text-4xl md:text-5xl text-white tracking-tight drop-shadow-[0_0_15px_rgba(0,240,118,0.4)]">
-                        {live.price}
-                      </span>
-                      <span className="text-xs sm:text-sm line-through text-white/40 font-medium">
-                        {live.originalPrice}
-                      </span>
-                      <span className="text-[10px] sm:text-xs font-bold text-[#00F076] bg-[#00F076]/15 px-2 py-0.5 rounded border border-[#00F076]/30">
-                        /one-time
-                      </span>
-                    </div>
-
-                    <p className="mt-1 text-xs font-bold text-[#00F076]">
-                      {live.priceNote}
-                    </p>
-
-                    <p className="mt-2.5 sm:mt-3 text-xs sm:text-sm text-white/80 leading-relaxed border-t border-white/10 pt-2.5 sm:pt-3">
-                      {live.desc}
-                    </p>
-
-                    {/* Verified Inclusions Header */}
-                    <div className="mt-4 sm:mt-6 flex items-center gap-1.5 text-[10px] sm:text-xs font-black uppercase tracking-wider text-[#00F076]">
-                      <ShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
-                      <span>✨ LIVE INCLUSIONS:</span>
-                    </div>
-
-                    {/* Feature Highlights */}
-                    <div className="mt-2.5 sm:mt-3.5 space-y-2 sm:space-y-3">
-                      {live.features.map((feat, idx) => (
-                        <div key={idx} className="flex items-start gap-2 sm:gap-3">
-                          <div className="h-4 w-4 sm:h-5 sm:w-5 rounded-full bg-[#072416] border border-[#00F076] flex items-center justify-center shrink-0 text-[#00F076] shadow-[0_0_8px_rgba(0,240,118,0.4)] mt-0.5">
-                            <Check className="h-2.5 w-2.5 sm:h-3 sm:w-3 stroke-[3]" />
-                          </div>
-                          <span className="text-xs sm:text-sm text-white font-medium leading-snug">
-                            {feat}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* CTA Button */}
-                  <div className="mt-6 sm:mt-8 pt-3 sm:pt-4 border-t border-white/10">
-                    <button
-                      onClick={() => handleEnroll("live")}
-                      className="group relative flex w-full items-center justify-center gap-2 rounded-xl sm:rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-3 sm:py-4 px-4 sm:px-6 text-xs sm:text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(0,240,118,0.75)] transition-all duration-200 hover:shadow-[0_0_40px_rgba(0,240,118,0.95)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
-                    >
-                      <Zap className="h-4 w-4 fill-black text-black shrink-0" />
-                      <span>Join Live — {live.price}</span>
-                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1 shrink-0" />
-                    </button>
-                    <p className="mt-1.5 sm:mt-2 text-center text-[10px] sm:text-xs text-[#00F076] font-semibold">
-                      🔒 1-on-1 Mentorship + VIP WhatsApp Community
-                    </p>
-                  </div>
-                </div>
-
-                {/* ================= OPTION 2: RECORDED SESSIONS (SHARP RADIANT YELLOW THEME) ================= */}
-                <div className="relative flex flex-col justify-between rounded-[24px] sm:rounded-[32px] md:rounded-[36px] border-2 border-[#FFE600] bg-gradient-to-b from-[#221c05] via-[#120f02] to-[#050401] p-5 sm:p-7 md:p-8 shadow-[0_0_45px_-5px_rgba(255,230,0,0.35)] transition-all">
-                  {/* Glowing halo behind badge */}
-                  <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-48 sm:w-64 h-14 sm:h-20 bg-[#FFE600]/25 blur-xl rounded-full pointer-events-none" />
-
-                  {/* Clean Top Ribbon Badge */}
-                  <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 z-20 whitespace-nowrap flex items-center gap-1.5 rounded-full bg-[#FFE600] px-3.5 sm:px-4 py-1 text-[9.5px] sm:text-[11px] font-black uppercase tracking-wider text-black shadow-[0_0_20px_rgba(255,230,0,0.95)] ring-1 ring-white/50">
-                    <span className="text-[10px] sm:text-xs font-black text-black">✦</span>
-                    <span className="text-black">⭐ RECOMMENDED • SELF-PACED</span>
-                  </div>
-
-                  <div>
-                    {/* Header Info */}
-                    <div className="flex items-center justify-between mt-1 sm:mt-2">
-                      <div>
-                        <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest text-[#FFE600]">
-                          OPTION 2
-                        </span>
-                        <h3 className="font-display font-extrabold italic text-lg sm:text-2xl text-white mt-0.5 leading-tight">
-                          Recorded Sessions
-                        </h3>
-                      </div>
-                      <span className="rounded-lg sm:rounded-xl border border-[#FFE600]/50 bg-[#FFE600]/15 px-2 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-[#FFE600] shrink-0">
+                      <span className="rounded-xl border border-[#00F076]/40 bg-[#00F076]/15 px-3 py-1 text-[10px] sm:text-xs font-black uppercase tracking-wider text-[#00F076] shrink-0">
                         {recorded.discount}
                       </span>
                     </div>
 
-                    {/* Price with Original Crossed Price & /one-time tag */}
-                    <div className="mt-3 sm:mt-5 flex items-baseline gap-2 sm:gap-2.5 flex-wrap">
-                      <span className="font-display font-extrabold italic text-3xl sm:text-4xl md:text-5xl text-white tracking-tight drop-shadow-[0_0_15px_rgba(255,230,0,0.35)]">
+                    {/* Price with Original Crossed Real Price (5999) & Flat Fee (2499) */}
+                    <div className="mt-4 sm:mt-5 flex items-baseline gap-2.5 sm:gap-3 flex-wrap">
+                      <span className="font-display font-extrabold italic text-4xl sm:text-5xl md:text-6xl text-white tracking-tight drop-shadow-[0_0_20px_rgba(0,240,118,0.4)]">
                         {recorded.price}
                       </span>
-                      <span className="text-xs sm:text-sm line-through text-white/40 font-medium">
+                      <span className="text-base sm:text-lg line-through text-white/40 font-semibold">
                         {recorded.originalPrice}
                       </span>
-                      <span className="text-[10px] sm:text-xs font-bold text-[#FFE600] bg-[#FFE600]/15 px-2 py-0.5 rounded border border-[#FFE600]/30">
-                        /one-time
+                      <span className="text-[11px] sm:text-xs font-bold text-[#00F076] bg-[#00F076]/15 px-2.5 py-1 rounded-lg border border-[#00F076]/30">
+                        Flat Fee
                       </span>
                     </div>
 
-                    <p className="mt-1 text-xs font-bold text-[#FFE600]">
+                    <p className="mt-1 text-xs font-bold text-[#00F076]">
                       {recorded.priceNote}
                     </p>
 
-                    <p className="mt-2.5 sm:mt-3 text-xs sm:text-sm text-white/80 leading-relaxed border-t border-white/10 pt-2.5 sm:pt-3">
+                    {/* Details section mentioning recorded curriculum */}
+                    <p className="mt-3 text-xs sm:text-sm text-white/85 leading-relaxed border-t border-white/10 pt-3">
                       {recorded.desc}
                     </p>
 
                     {/* Verified Inclusions Header */}
-                    <div className="mt-4 sm:mt-6 flex items-center gap-1.5 text-[10px] sm:text-xs font-black uppercase tracking-wider text-[#FFE600]">
-                      <CheckCircle2 className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0 text-[#FFE600]" />
-                      <span>✨ RECORDED INCLUSIONS:</span>
+                    <div className="mt-5 sm:mt-6 flex items-center gap-1.5 text-[11px] sm:text-xs font-black uppercase tracking-wider text-[#00F076]">
+                      <ShieldCheck className="h-4 w-4 shrink-0 text-[#00F076]" />
+                      <span>✨ MASTERCLASS INCLUSIONS &amp; DETAILS:</span>
                     </div>
 
                     {/* Feature Highlights */}
-                    <div className="mt-2.5 sm:mt-3.5 space-y-2 sm:space-y-3">
+                    <div className="mt-3 sm:mt-4 space-y-2.5 sm:space-y-3">
                       {recorded.features.map((feat, idx) => (
-                        <div key={idx} className="flex items-start gap-2 sm:gap-3">
-                          <div className="h-4 w-4 sm:h-5 sm:w-5 rounded-full bg-[#1c1602] border border-[#FFE600] flex items-center justify-center shrink-0 text-[#FFE600] mt-0.5 shadow-[0_0_8px_rgba(255,230,0,0.4)]">
-                            <Check className="h-2.5 w-2.5 sm:h-3 sm:w-3 stroke-[3]" />
+                        <div key={idx} className="flex items-start gap-2.5 sm:gap-3">
+                          <div className="h-5 w-5 rounded-full bg-[#072416] border border-[#00F076] flex items-center justify-center shrink-0 text-[#00F076] mt-0.5 shadow-[0_0_8px_rgba(0,240,118,0.4)]">
+                            <Check className="h-3 w-3 stroke-[3]" />
                           </div>
                           <span className="text-xs sm:text-sm text-white font-medium leading-snug">
                             {feat}
@@ -924,23 +839,23 @@ export function NextStepScreen() {
                   </div>
 
                   {/* CTA Button */}
-                  <div className="mt-6 sm:mt-8 pt-3 sm:pt-4 border-t border-white/10">
+                  <div className="mt-7 sm:mt-8 pt-4 sm:pt-5 border-t border-white/10">
                     <button
                       onClick={() => handleEnroll("recorded")}
-                      className="group relative flex w-full items-center justify-center gap-2 rounded-xl sm:rounded-2xl bg-gradient-to-r from-[#FFE600] via-[#FFD600] to-[#E5A800] py-3 sm:py-4 px-4 sm:px-6 text-xs sm:text-sm font-display font-black uppercase tracking-wider text-black shadow-[0_0_25px_rgba(255,230,0,0.75)] transition-all duration-200 hover:shadow-[0_0_40px_rgba(255,230,0,0.95)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
+                      className="group relative flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] py-4 sm:py-4.5 px-6 text-sm sm:text-base font-display font-black uppercase tracking-wider text-black shadow-[0_0_30px_rgba(0,240,118,0.75)] transition-all duration-200 hover:shadow-[0_0_45px_rgba(0,240,118,0.95)] hover:scale-[1.02] active:scale-[0.98] cursor-pointer"
                     >
-                      <Rocket className="h-4 w-4 fill-black text-black shrink-0" />
-                      <span>Get Recorded — {recorded.price}</span>
-                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1 shrink-0" />
+                      <Zap className="h-5 w-5 fill-black text-black shrink-0" />
+                      <span>Enroll Now — Flat {recorded.price}</span>
+                      <ArrowRight className="h-5 w-5 transition-transform group-hover:translate-x-1 shrink-0" />
                     </button>
-                    <p className="mt-1.5 sm:mt-2 text-center text-[10px] sm:text-xs text-[#FFE600] font-semibold">
-                      ⚡ Instant Access to All Modules + 100+ Prompts
+                    <p className="mt-2 text-center text-[11px] sm:text-xs text-[#00F076] font-semibold">
+                      ⚡ Instant Lifetime Access + 100+ AI Prompt Vault &amp; Community
                     </p>
                   </div>
                 </div>
               </div>
 
-              {/* ================= INCLUDED IN BOTH MASTERCLASS TRACKS (CORE VALUE PILLARS) ================= */}
+              {/* ================= INCLUDED IN MASTERCLASS (CORE VALUE PILLARS) ================= */}
               <div className="mt-14 sm:mt-16 max-w-4xl mx-auto rounded-3xl border border-white/10 bg-gradient-to-b from-[#06180e]/90 via-[#030d07]/95 to-[#020604] p-6 sm:p-9 shadow-2xl">
                 <div className="text-center max-w-2xl mx-auto mb-8">
                   <span className="inline-flex items-center gap-1.5 rounded-full border border-[#00F076]/30 bg-[#072416] px-3.5 py-1 text-xs font-bold text-[#00F076] mb-2">
@@ -950,7 +865,7 @@ export function NextStepScreen() {
                     Everything Included in <span className="text-[#00F076]">PenduGPT</span>
                   </h3>
                   <p className="mt-2 text-xs sm:text-sm text-white/70">
-                    We cover every single step from zero coding knowledge to delivering live
+                    We cover every single step from zero coding knowledge to launching published
                     websites and closing ₹25,000–₹50,000 clients.
                   </p>
                 </div>
@@ -1073,30 +988,23 @@ export function NextStepScreen() {
                   </div>
                 </div>
 
-                {/* Direct comparison summary box */}
-                <div className="mt-8 rounded-2xl border border-[#00F076]/30 bg-[#05160d] p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+                {/* Masterclass Enrollment Summary Box */}
+                <div className="mt-8 rounded-2xl border border-[#00F076]/30 bg-[#05160d] p-5 sm:p-7 flex flex-col sm:flex-row items-center justify-between gap-5">
                   <div>
-                    <h4 className="font-display font-extrabold text-white text-base">
-                      Need 1-on-1 Guidance and Real-Time Review?
+                    <h4 className="font-display font-extrabold text-white text-base sm:text-lg">
+                      Ready to Start Building High-Ticket Websites with AI?
                     </h4>
-                    <p className="text-xs text-white/70 mt-1">
-                      Choose <strong>Option 1 (Live Masterclass)</strong> for live Zoom sessions with
-                      Khushpreet Singh, personal website screen shares, and roleplays. Choose{" "}
-                      <strong>Option 2 (Recorded)</strong> if you prefer learning at your own pace.
+                    <p className="text-xs sm:text-sm text-white/70 mt-1 max-w-xl">
+                      Enroll today for flat <strong>{recorded.price}</strong> (slashed from {recorded.originalPrice}) and unlock instant lifetime access to all HD recorded video modules, copy-paste prompt formulas, and VIP WhatsApp mentor support.
                     </p>
                   </div>
-                  <div className="flex gap-2 shrink-0">
-                    <button
-                      onClick={() => handleEnroll("live")}
-                      className="rounded-xl bg-[#00F076] hover:bg-[#00d668] text-black text-xs font-bold px-4 py-2.5 transition-all cursor-pointer shadow-md"
-                    >
-                      Join Live ({live.price})
-                    </button>
+                  <div className="shrink-0 w-full sm:w-auto">
                     <button
                       onClick={() => handleEnroll("recorded")}
-                      className="rounded-xl bg-[#FFE600] hover:bg-[#ffd600] text-black text-xs font-bold px-4 py-2.5 transition-all cursor-pointer shadow-md"
+                      className="w-full sm:w-auto rounded-xl bg-gradient-to-r from-[#00F076] to-[#00d668] text-black text-xs sm:text-sm font-display font-black uppercase tracking-wider px-6 py-3.5 transition-all cursor-pointer shadow-[0_0_20px_rgba(0,240,118,0.5)] hover:scale-105 active:scale-95 text-center flex items-center justify-center gap-2"
                     >
-                      Recorded ({recorded.price})
+                      <span>Enroll Now (Flat {recorded.price})</span>
+                      <ArrowRight className="h-4 w-4" />
                     </button>
                   </div>
                 </div>

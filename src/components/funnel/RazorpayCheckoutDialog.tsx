@@ -141,7 +141,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
               name: "PenduGPT Learner",
             },
         theme: {
-          color: isRecorded ? "#FFE600" : "#00F076",
+          color: siteConfig.razorpay.themeColor || "#00F076",
         },
         // Display all payment modes (UPI, Cards, Netbanking, Wallets)
         config: {
@@ -396,24 +396,9 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
           <div className="py-2 text-center animate-reveal">
             {/* Class Specific Badge */}
             <div className="flex items-center justify-between pb-1">
-              <span
-                className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider ${
-                  isRecorded
-                    ? "bg-[#FFE600]/20 border border-[#FFE600]/40 text-[#FFE600]"
-                    : "bg-[#00F076]/20 border border-[#00F076]/40 text-[#00F076]"
-                }`}
-              >
-                {isRecorded ? (
-                  <>
-                    <span>✦</span>
-                    <span>{courseConfig.badge}</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="h-2 w-2 rounded-full bg-red-500 animate-ping shrink-0" />
-                    <span>{courseConfig.badge}</span>
-                  </>
-                )}
+              <span className="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider bg-[#00F076]/20 border border-[#00F076]/40 text-[#00F076]">
+                <span>✦</span>
+                <span>{courseConfig.badge}</span>
               </span>
 
               <span className="rounded-lg border border-red-500/40 bg-red-950/60 px-2.5 py-0.5 text-[9.5px] font-black uppercase tracking-wider text-red-400">
@@ -437,23 +422,13 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
             </p>
 
             {/* Tailored Class Offer Recap Box */}
-            <div
-              className={`mt-4 rounded-2xl border p-4 text-left shadow-inner ${
-                isRecorded
-                  ? "border-[#FFE600]/30 bg-[#161302]/80"
-                  : "border-[#00F076]/30 bg-[#061c11]/80"
-              }`}
-            >
+            <div className="mt-4 rounded-2xl border border-[#00F076]/30 bg-[#061c11]/80 p-4 text-left shadow-inner">
               <div className="flex items-baseline justify-between">
                 <span className="text-xs font-black uppercase tracking-wider text-white/70">
                   {courseConfig.name}
                 </span>
                 <div className="flex items-baseline gap-1.5">
-                  <span
-                    className={`font-display font-black text-2xl ${
-                      isRecorded ? "text-[#FFE600]" : "text-[#00F076]"
-                    }`}
-                  >
+                  <span className="font-display font-black text-2xl text-[#00F076]">
                     {courseConfig.price}
                   </span>
                   <span className="text-xs line-through text-white/40">
@@ -465,11 +440,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
               <div className="mt-2.5 space-y-1.5 border-t border-white/10 pt-2.5 text-xs text-white/90">
                 {courseConfig.features.slice(0, 3).map((feat, idx) => (
                   <div key={idx} className="flex items-center gap-2">
-                    <Check
-                      className={`h-3.5 w-3.5 shrink-0 stroke-[3] ${
-                        isRecorded ? "text-[#FFE600]" : "text-[#00F076]"
-                      }`}
-                    />
+                    <Check className="h-3.5 w-3.5 shrink-0 stroke-[3] text-[#00F076]" />
                     <span className="text-[11px] leading-tight text-white/90 font-medium">
                       {feat}
                     </span>
@@ -488,11 +459,7 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
               <button
                 type="button"
                 onClick={startRazorpayCheckout}
-                className={`group flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-sm font-display font-black uppercase tracking-wider text-black shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer ${
-                  isRecorded
-                    ? "bg-gradient-to-r from-[#FFE600] via-[#fff055] to-[#f4dc00] shadow-[0_0_30px_rgba(255,230,0,0.65)] hover:shadow-[0_0_45px_rgba(255,230,0,0.9)]"
-                    : "bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] shadow-[0_0_30px_rgba(0,240,118,0.65)] hover:shadow-[0_0_45px_rgba(0,240,118,0.9)]"
-                }`}
+                className="group flex w-full items-center justify-center gap-2 rounded-2xl py-4 text-sm font-display font-black uppercase tracking-wider text-black shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] cursor-pointer bg-gradient-to-r from-[#00F076] via-[#33f88f] to-[#00d668] shadow-[0_0_30px_rgba(0,240,118,0.65)] hover:shadow-[0_0_45px_rgba(0,240,118,0.9)]"
               >
                 <RotateCcw className="h-4 w-4 stroke-[2.5]" />
                 <span>Retry Payment — Flat {courseConfig.price}</span>

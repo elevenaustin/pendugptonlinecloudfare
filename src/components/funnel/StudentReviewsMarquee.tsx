@@ -46,8 +46,8 @@ const reviews: Review[] = [
     highlightBadge: "$850 CAD First Deal",
     avatarImage: "/reviews/boys/boy-2.jpg",
     reviewText:
-      "Live Zoom masterclass ch Khushpreet veer ne live client pitching roleplay sikhaya. Same cold outreach method use karke Brampton de local Punjabi restaurant nu approach kita te $850 CAD da contract sign karwaya!",
-    highlightPoint: "Live Pitching & Cold Outreach Mastery",
+      "PenduGPT Masterclass ch Khushpreet veer ne practical client pitching framework sikhaya. Same cold outreach method use karke Brampton de local Punjabi restaurant nu approach kita te $850 CAD da contract sign karwaya!",
+    highlightPoint: "Client Pitching & Cold Outreach Mastery",
   },
   {
     id: "4",
@@ -70,8 +70,8 @@ const reviews: Review[] = [
     highlightBadge: "Zero Coding Required",
     avatarImage: "/reviews/boys/boy-3.jpg",
     reviewText:
-      "Zero technical background si mera. Live sessions ch 1-on-1 screen share karke saare doubts live solve hoye. Free cloud deployment sikhan naal monthly server expenses zero ho gaye. 100% value for money!",
-    highlightPoint: "1-on-1 Live Doubt Solving & Screen Share",
+      "Zero technical background si mera. Step-by-step video modules te WhatsApp mentor support naal saare doubts easily solve hoye. Free cloud deployment sikhan naal monthly server expenses zero ho gaye. 100% value for money!",
+    highlightPoint: "Step-by-Step Training & Doubt Solving",
   },
   {
     id: "6",
