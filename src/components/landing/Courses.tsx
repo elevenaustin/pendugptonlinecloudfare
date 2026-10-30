@@ -67,10 +67,10 @@ export function Courses({
                 <span className="font-display text-4xl font-extrabold text-white">
                   {recorded.price}
                 </span>
-                <span className="text-base line-through text-muted-foreground/60 font-semibold">
+                <span className="font-mono font-bold text-base line-through decoration-red-500 decoration-[2.5px] text-zinc-400">
                   {recorded.originalPrice}
                 </span>
-                <span className="text-xs text-[#00F076] font-semibold bg-[#00F076]/10 px-2 py-0.5 rounded border border-[#00F076]/20">
+                <span className="text-xs text-[#00F076] font-semibold bg-[#00F076]/10 px-2.5 py-0.5 rounded-full border border-[#00F076]/20">
                   Flat Fee
                 </span>
               </div>

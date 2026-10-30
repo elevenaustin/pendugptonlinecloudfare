@@ -427,11 +427,11 @@ export function RazorpayCheckoutDialog({ tier, onClose }: RazorpayCheckoutDialog
                 <span className="text-xs font-black uppercase tracking-wider text-white/70">
                   {courseConfig.name}
                 </span>
-                <div className="flex items-baseline gap-1.5">
+                <div className="flex items-baseline gap-2">
                   <span className="font-display font-black text-2xl text-[#00F076]">
                     {courseConfig.price}
                   </span>
-                  <span className="text-xs line-through text-white/40">
+                  <span className="font-mono font-bold text-xs line-through decoration-red-500 decoration-[2px] text-zinc-400">
                     {courseConfig.originalPrice}
                   </span>
                 </div>
